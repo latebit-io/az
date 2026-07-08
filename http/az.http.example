@@ -1,0 +1,164 @@
+### Copy this file to az.http and adjust values. Requires a running az service.
+
+@host = http://localhost:8080
+# When API_KEY_ENABLED=true add to each request:
+# X-AZ-API-KEY: your-api-key
+
+### Health
+GET {{host}}/health
+
+### Create a resource type
+POST {{host}}/api/resources
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "document",
+  "name": "Document",
+  "description": "documents",
+  "actions": ["read", "write", "delete"],
+  "attributes": [{"key": "public", "type": "bool"}]
+}
+
+### Get a resource type
+POST {{host}}/api/resources/get
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "document"
+}
+
+### List resource types
+POST {{host}}/api/resources/list
+Content-Type: application/json
+
+{
+  "tenantId": "default"
+}
+
+### Create a resource instance
+POST {{host}}/api/resources/instances
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "resourceType": "document",
+  "key": "doc-1",
+  "attributes": {"public": true}
+}
+
+### Create a subject
+POST {{host}}/api/subjects
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "user@example.com",
+  "email": "user@example.com",
+  "attributes": {"department": "engineering"}
+}
+
+### Create a role
+POST {{host}}/api/roles
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "editor",
+  "name": "Editor",
+  "description": "can read and write documents",
+  "permissions": [
+    {"resource": "document", "action": "read"},
+    {"resource": "document", "action": "write"}
+  ]
+}
+
+### Assign a role
+POST {{host}}/api/assignments
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com",
+  "role": "editor"
+}
+
+### Roles for a subject (for JWT roles claim)
+POST {{host}}/api/subjects/roles
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "user@example.com"
+}
+
+### Create a subject condition set
+POST {{host}}/api/conditionsets
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "engineers",
+  "name": "Engineers",
+  "type": "subject",
+  "conditions": {"attribute": "department", "operator": "equals", "value": "engineering"}
+}
+
+### Create a resource condition set
+POST {{host}}/api/conditionsets
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "public-docs",
+  "name": "Public documents",
+  "type": "resource",
+  "resourceType": "document",
+  "conditions": {"attribute": "public", "operator": "equals", "value": true}
+}
+
+### Create a condition set rule (engineers may read public docs)
+POST {{host}}/api/conditionsets/rules
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subjectSet": "engineers",
+  "permission": {"resource": "document", "action": "read"},
+  "resourceSet": "public-docs"
+}
+
+### Check (RBAC)
+POST {{host}}/api/check
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": {"key": "user@example.com"},
+  "action": "write",
+  "resource": {"type": "document"}
+}
+
+### Check (ABAC with inline attributes)
+POST {{host}}/api/check
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": {"key": "someone-else", "attributes": {"department": "engineering"}},
+  "action": "read",
+  "resource": {"type": "document", "key": "doc-1"}
+}
+
+### Bulk check
+POST {{host}}/api/check/bulk
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "checks": [
+    {"subject": {"key": "user@example.com"}, "action": "write", "resource": {"type": "document"}},
+    {"subject": {"key": "user@example.com"}, "action": "delete", "resource": {"type": "document"}}
+  ]
+}
