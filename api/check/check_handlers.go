@@ -15,19 +15,15 @@ type CheckHandler struct {
 }
 
 type CheckRequest struct {
-	TenantID string              `json:"tenantId"`
-	Subject  check.CheckSubject  `json:"subject"`
-	Action   string              `json:"action"`
-	Resource check.CheckResource `json:"resource"`
+	TenantID string `json:"tenantId"`
+	Subject  string `json:"subject"`
+	Action   string `json:"action"`
+	Resource string `json:"resource"`
 }
 
 type BulkCheckRequest struct {
-	TenantID string `json:"tenantId"`
-	Checks   []struct {
-		Subject  check.CheckSubject  `json:"subject"`
-		Action   string              `json:"action"`
-		Resource check.CheckResource `json:"resource"`
-	} `json:"checks"`
+	TenantID string               `json:"tenantId"`
+	Checks   []check.CheckRequest `json:"checks"`
 }
 
 type BulkCheckResponse struct {
@@ -38,7 +34,7 @@ func NewCheckHandler(service check.CheckService) CheckHandler {
 	return CheckHandler{service}
 }
 
-// Check decides whether a subject may perform an action on a resource.
+// Check decides whether a subject may perform an action on a resource type.
 // Denies return 200 with allow:false — callers branch on the decision.
 func (ch CheckHandler) Check(c *echo.Context) error {
 	request := new(CheckRequest)
@@ -64,16 +60,8 @@ func (ch CheckHandler) CheckBulk(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	requests := make([]check.CheckRequest, 0, len(request.Checks))
-	for _, item := range request.Checks {
-		requests = append(requests, check.CheckRequest{
-			Subject:  item.Subject,
-			Action:   item.Action,
-			Resource: item.Resource,
-		})
-	}
-
-	decisions, err := ch.check.CheckBulk(c.Request().Context(), utils.TenantOrDefault(request.TenantID), requests)
+	decisions, err := ch.check.CheckBulk(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+		request.Checks)
 	if err != nil {
 		return checkProblem(c, err)
 	}

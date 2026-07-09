@@ -2,7 +2,6 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -31,15 +30,9 @@ func NewPostgresResourceTypeRepository(pool *pgxpool.Pool) ResourceTypeRepositor
 
 func (r *PostgresResourceTypeRepository) Create(ctx context.Context, resourceType ResourceType) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	attributes, err := marshalAttributes(resourceType.Attributes)
-	if err != nil {
-		return err
-	}
-	_, err = querier.Exec(ctx,
-		`INSERT INTO resource_types (tenant_id, key, name, description, actions, attributes)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		resourceType.TenantID, resourceType.Key, resourceType.Name, resourceType.Description,
-		resourceType.Actions, attributes)
+	_, err := querier.Exec(ctx,
+		"INSERT INTO resource_types (tenant_id, key, actions) VALUES ($1, $2, $3)",
+		resourceType.TenantID, resourceType.Key, resourceType.Actions)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 		return ResourceTypeDuplicateError{Value: resourceType.Key}
@@ -50,7 +43,7 @@ func (r *PostgresResourceTypeRepository) Create(ctx context.Context, resourceTyp
 func (r *PostgresResourceTypeRepository) Read(ctx context.Context, tenantID, key string) (*ResourceType, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	row := querier.QueryRow(ctx,
-		`SELECT id, tenant_id, key, name, description, actions, attributes, created, modified
+		`SELECT id, tenant_id, key, actions, created, modified
 		 FROM resource_types WHERE tenant_id = $1 AND key = $2`, tenantID, key)
 	resourceType, err := scanResourceType(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -65,7 +58,7 @@ func (r *PostgresResourceTypeRepository) Read(ctx context.Context, tenantID, key
 func (r *PostgresResourceTypeRepository) ReadAll(ctx context.Context, tenantID string) ([]ResourceType, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	rows, err := querier.Query(ctx,
-		`SELECT id, tenant_id, key, name, description, actions, attributes, created, modified
+		`SELECT id, tenant_id, key, actions, created, modified
 		 FROM resource_types WHERE tenant_id = $1 ORDER BY key`, tenantID)
 	if err != nil {
 		return nil, err
@@ -85,15 +78,9 @@ func (r *PostgresResourceTypeRepository) ReadAll(ctx context.Context, tenantID s
 
 func (r *PostgresResourceTypeRepository) Update(ctx context.Context, resourceType ResourceType) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	attributes, err := marshalAttributes(resourceType.Attributes)
-	if err != nil {
-		return err
-	}
 	tag, err := querier.Exec(ctx,
-		`UPDATE resource_types SET name = $3, description = $4, actions = $5, attributes = $6, modified = now()
-		 WHERE tenant_id = $1 AND key = $2`,
-		resourceType.TenantID, resourceType.Key, resourceType.Name, resourceType.Description,
-		resourceType.Actions, attributes)
+		"UPDATE resource_types SET actions = $3, modified = now() WHERE tenant_id = $1 AND key = $2",
+		resourceType.TenantID, resourceType.Key, resourceType.Actions)
 	if err != nil {
 		return err
 	}
@@ -115,22 +102,11 @@ func (r *PostgresResourceTypeRepository) Delete(ctx context.Context, tenantID, k
 	return nil
 }
 
-func marshalAttributes(attributes []AttributeDef) ([]byte, error) {
-	if attributes == nil {
-		attributes = []AttributeDef{}
-	}
-	return json.Marshal(attributes)
-}
-
 func scanResourceType(row pgx.Row) (*ResourceType, error) {
 	var resourceType ResourceType
-	var attributes []byte
-	err := row.Scan(&resourceType.ID, &resourceType.TenantID, &resourceType.Key, &resourceType.Name,
-		&resourceType.Description, &resourceType.Actions, &attributes, &resourceType.Created, &resourceType.Modified)
+	err := row.Scan(&resourceType.ID, &resourceType.TenantID, &resourceType.Key, &resourceType.Actions,
+		&resourceType.Created, &resourceType.Modified)
 	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(attributes, &resourceType.Attributes); err != nil {
 		return nil, err
 	}
 	return &resourceType, nil

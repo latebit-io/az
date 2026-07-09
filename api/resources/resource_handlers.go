@@ -15,12 +15,9 @@ type ResourceHandler struct {
 }
 
 type ResourceTypeRequest struct {
-	TenantID    string                   `json:"tenantId"`
-	Key         string                   `json:"key"`
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Actions     []string                 `json:"actions"`
-	Attributes  []resources.AttributeDef `json:"attributes"`
+	TenantID string   `json:"tenantId"`
+	Key      string   `json:"key"`
+	Actions  []string `json:"actions"`
 }
 
 type GetResourceTypeRequest struct {
@@ -36,7 +33,7 @@ func NewResourceHandler(service resources.ResourceService) ResourceHandler {
 	return ResourceHandler{service}
 }
 
-// Create defines a new resource type with its actions and attribute definitions.
+// Create defines a new resource type with its actions.
 func (rh ResourceHandler) Create(c *echo.Context) error {
 	request := new(ResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
@@ -45,7 +42,7 @@ func (rh ResourceHandler) Create(c *echo.Context) error {
 	}
 
 	err := rh.resources.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key,
-		request.Name, request.Description, request.Actions, request.Attributes)
+		request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
@@ -85,7 +82,7 @@ func (rh ResourceHandler) List(c *echo.Context) error {
 	return c.JSON(http.StatusOK, resourceTypes)
 }
 
-// Update replaces a resource type's name, description, actions and attribute definitions.
+// Update replaces a resource type's actions.
 func (rh ResourceHandler) Update(c *echo.Context) error {
 	request := new(ResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
@@ -94,7 +91,7 @@ func (rh ResourceHandler) Update(c *echo.Context) error {
 	}
 
 	err := rh.resources.Update(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key,
-		request.Name, request.Description, request.Actions, request.Attributes)
+		request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}

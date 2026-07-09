@@ -42,27 +42,3 @@ type InvalidResourceTypeError struct {
 func (e InvalidResourceTypeError) Error() string {
 	return fmt.Sprintf("invalid resource type: %s", e.Value)
 }
-
-type InstanceDuplicateError struct {
-	Value string `json:"value"`
-}
-
-func (e InstanceDuplicateError) Error() string {
-	return fmt.Sprintf("duplicate resource instance: '%s' already exists", e.Value)
-}
-
-type InstanceNotFoundError struct {
-	Value string `json:"value"`
-}
-
-func (e InstanceNotFoundError) Error() string {
-	return fmt.Sprintf("resource instance not found: %s", e.Value)
-}
-
-type InvalidInstanceError struct {
-	Value string `json:"value"`
-}
-
-func (e InvalidInstanceError) Error() string {
-	return fmt.Sprintf("invalid resource instance: %s", e.Value)
-}

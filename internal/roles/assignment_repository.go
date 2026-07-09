@@ -15,7 +15,6 @@ type AssignmentRepository interface {
 	Create(ctx context.Context, assignment RoleAssignment) error
 	ReadAll(ctx context.Context, tenantID, subject, role string) ([]RoleAssignment, error)
 	Delete(ctx context.Context, tenantID, subject, role string) error
-	DeleteAllForSubject(ctx context.Context, tenantID, subject string) error
 	RolesForSubject(ctx context.Context, tenantID, subject string) ([]string, error)
 }
 
@@ -77,13 +76,6 @@ func (r *PostgresAssignmentRepository) Delete(ctx context.Context, tenantID, sub
 		return AssignmentNotFoundError{Subject: subject, Role: role}
 	}
 	return nil
-}
-
-func (r *PostgresAssignmentRepository) DeleteAllForSubject(ctx context.Context, tenantID, subject string) error {
-	querier := utils.QuerierFrom(ctx, r.pool)
-	_, err := querier.Exec(ctx, "DELETE FROM role_assignments WHERE tenant_id = $1 AND subject = $2",
-		tenantID, subject)
-	return err
 }
 
 func (r *PostgresAssignmentRepository) RolesForSubject(ctx context.Context, tenantID, subject string) ([]string, error) {

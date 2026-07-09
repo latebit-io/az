@@ -20,8 +20,7 @@ func newRoleFixture(t *testing.T) (RoleService, resources.ResourceService, conte
 	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool))
 	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), resourceService)
 	ctx := context.Background()
-	require.NoError(t, resourceService.Create(ctx, "default", "document", "Document", "",
-		[]string{"read", "write", "delete"}, nil))
+	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write", "delete"}))
 	return roleService, resourceService, ctx
 }
 
@@ -95,6 +94,26 @@ func TestRoleService_ListUpdateDelete(t *testing.T) {
 	assert.ErrorAs(t, err, &notFound)
 }
 
+func TestResourceTypeDeleteBlockedByRoleReference(t *testing.T) {
+	pool := utils.NewTestPool(t)
+	roleRepo := NewPostgresRoleRepository(pool)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
+		roleRepo)
+	roleService := NewDefaultRoleService(roleRepo, resourceService)
+	ctx := context.Background()
+
+	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read"}))
+	require.NoError(t, roleService.Create(ctx, "default", "viewer", "Viewer", "",
+		[]Permission{{Resource: "document", Action: "read"}}))
+
+	err := resourceService.Delete(ctx, "default", "document")
+	var referenced resources.ResourceTypeReferencedError
+	assert.ErrorAs(t, err, &referenced)
+
+	require.NoError(t, roleService.Delete(ctx, "default", "viewer"))
+	assert.NoError(t, resourceService.Delete(ctx, "default", "document"))
+}
+
 func TestRoleRepository_AnyGrants(t *testing.T) {
 	pool := utils.NewTestPool(t)
 	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool))
@@ -102,8 +121,7 @@ func TestRoleRepository_AnyGrants(t *testing.T) {
 	service := NewDefaultRoleService(repo, resourceService)
 	ctx := context.Background()
 
-	require.NoError(t, resourceService.Create(ctx, "default", "document", "Document", "",
-		[]string{"read", "write"}, nil))
+	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))
 	require.NoError(t, service.Create(ctx, "default", "viewer", "Viewer", "",
 		[]Permission{{Resource: "document", Action: "read"}}))
 	require.NoError(t, service.Create(ctx, "default", "editor", "Editor", "",

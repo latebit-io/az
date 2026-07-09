@@ -6,41 +6,37 @@ You are a staff engineer who loves to write the best tests, you try not to mock 
 
 ## Project Overview
 
-az is an API-based, developer-focused authorization (authz) service — RBAC + ABAC in the style of permit.io. It is the sibling of BulwarkAuth (authentication): BulwarkAuth answers "who are you", az answers "what can you do". Multi-tenant, PostgreSQL-backed, exposes a check API (policy decision point) plus management APIs for resource types, subjects, roles, role assignments, and attribute condition sets.
+az is an API-based, developer-focused authorization (authz) service — pure RBAC, kept deliberately minimal. It is the sibling of BulwarkAuth (authentication): BulwarkAuth answers "who are you", az answers "what can you do". Multi-tenant, PostgreSQL-backed, exposes a check API (policy decision point) plus management APIs for resource types, roles, and role assignments.
 
 ## Key Architecture
 
 Three layers, manual dependency injection wired in `cmd/az/main.go`:
 
-- `api/` — Echo v5 HTTP layer, one package per domain (`<domain>_handlers.go` + `<domain>_routes.go`). Request DTOs with `Validate()` methods; errors returned as RFC 7807 problem details (`api/problem`).
+- `api/` — Echo v5 HTTP layer, one package per domain (`<domain>_handlers.go` + `<domain>_routes.go`). Request DTOs; errors returned as RFC 7807 problem details (`api/problem`).
 - `internal/` — business logic, one package per domain. Each domain: service interface + `Default*Service` impl, repository interface + `Postgres*Repository` impl.
 - `cmd/az/` — entrypoint (`main.go`) and env config (`config.go`).
 
 Domains:
 - `internal/tenants` — tenant registry, `"default"` tenant auto-created at startup
-- `internal/resources` — resource types (actions, attribute definitions) and resource instances
-- `internal/subjects` — subjects (users/services) with attributes; subject key is opaque (BulwarkAuth accounts map via email)
-- `internal/roles` — roles (permission grants `resource:action`) and role assignments
-- `internal/conditions` — condition tree engine + condition sets (subject/resource) + condition set rules
+- `internal/resources` — resource types (key + actions)
+- `internal/roles` — roles (permission grants `resource:action`) and role assignments (subject → role); subject keys are opaque (BulwarkAuth accounts map via email)
 - `internal/check` — the decision engine (PDP)
 - `internal/db` — pgx pool + embedded SQL migrations (run at startup)
-- `internal/utils` — TxManager (transaction via context), key/email validation, embedded-postgres test util
+- `internal/utils` — QuerierFrom/TxManager, key validation, embedded-postgres test util
 
 Patterns:
 - Repositories resolve their querier with `utils.QuerierFrom(ctx, pool)` so the same methods work inside and outside `TxManager.WithTransaction`.
-- Typed domain errors (`*NotFoundError`, `*DuplicateError`, `ReferencedError`, ...) mapped in handlers via `errors.As` to problem details. Duplicates via unique constraints (pg error 23505), referenced deletes via FK RESTRICT (23503).
+- Typed domain errors (`*NotFoundError`, `*DuplicateError`, `*ReferencedError`, ...) mapped in handlers via `errors.As` to problem details. Duplicates via unique constraints (pg error 23505), cascades and blocks via FKs (23503).
 - Multi-tenant everywhere: `tenantID` is the first argument of service/repository methods; empty tenantId in requests means `"default"`.
+- Cross-package integrity without import cycles: small interfaces defined at the consumer (`resources.ReferenceChecker`), implemented by repositories elsewhere, wired in main.
 
 ## Decision Engine
 
-`POST /api/check` with `{tenantId, subject{key, attributes?}, action, resource{type, key?, attributes?}}` → `{allow, reason}`:
+`POST /api/check` with `{tenantId, subject, action, resource}` → `{allow, reason}`:
 
 1. Resolve resource type; unknown type/action → deny (200 with allow:false, never an error).
-2. RBAC: subject's role assignments joined against role permission grants — match → allow.
-3. ABAC: condition set rules for (resource, action); merge stored attributes with inline (inline wins, shallow); first rule whose subject-set AND resource-set conditions evaluate true → allow.
-4. Otherwise deny.
-
-Condition semantics are fail-closed: a missing attribute makes a leaf false for every operator (including not-equals). Operators: equals, not-equals, in, not-in, gt, gte, lt, lte, contains.
+2. Subject's role assignments joined against role permission grants (jsonb containment, GIN indexed) — match → allow.
+3. Otherwise deny.
 
 ## Coding Standards
 

@@ -16,17 +16,13 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	checkapi "github.com/latebit-io/az/api/check"
-	conditionsapi "github.com/latebit-io/az/api/conditions"
 	"github.com/latebit-io/az/api/health"
 	resourcesapi "github.com/latebit-io/az/api/resources"
 	rolesapi "github.com/latebit-io/az/api/roles"
-	subjectsapi "github.com/latebit-io/az/api/subjects"
 	"github.com/latebit-io/az/internal/check"
-	"github.com/latebit-io/az/internal/conditions"
 	"github.com/latebit-io/az/internal/db"
 	"github.com/latebit-io/az/internal/resources"
 	"github.com/latebit-io/az/internal/roles"
-	"github.com/latebit-io/az/internal/subjects"
 	"github.com/latebit-io/az/internal/tenants"
 	"github.com/latebit-io/az/internal/utils"
 	"github.com/latebit-io/az/internal/version"
@@ -75,7 +71,6 @@ func main() {
 	}
 
 	ratelimiter := middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(float64(config.RequestsPerSecond)))
-	txManager := utils.NewPostgresTxManager(pool)
 	tenantRepository := tenants.NewPostgresTenantRepository(pool)
 	tenantService := tenants.NewDefaultTenantService(tenantRepository)
 	err = createDefaultTenantID(ctx, tenantService)
@@ -84,16 +79,9 @@ func main() {
 	}
 	resourceRepository := resources.NewPostgresResourceTypeRepository(pool)
 	roleRepository := roles.NewPostgresRoleRepository(pool)
-	conditionSetRepository := conditions.NewPostgresConditionSetRepository(pool)
-	ruleRepository := conditions.NewPostgresRuleRepository(pool)
-	resourceService := resources.NewDefaultResourceService(resourceRepository, roleRepository,
-		conditionSetRepository, ruleRepository)
+	resourceService := resources.NewDefaultResourceService(resourceRepository, roleRepository)
 	resourceHandler := resourcesapi.NewResourceHandler(resourceService)
 	resourcesapi.ResourceRoutes(service, resourceHandler, ratelimiter)
-	instanceRepository := resources.NewPostgresInstanceRepository(pool)
-	instanceService := resources.NewDefaultInstanceService(instanceRepository)
-	instanceHandler := resourcesapi.NewInstanceHandler(instanceService)
-	resourcesapi.InstanceRoutes(service, instanceHandler, ratelimiter)
 	roleService := roles.NewDefaultRoleService(roleRepository, resourceService)
 	roleHandler := rolesapi.NewRoleHandler(roleService)
 	rolesapi.RoleRoutes(service, roleHandler, ratelimiter)
@@ -101,19 +89,8 @@ func main() {
 	assignmentService := roles.NewDefaultAssignmentService(assignmentRepository)
 	assignmentHandler := rolesapi.NewAssignmentHandler(assignmentService)
 	rolesapi.AssignmentRoutes(service, assignmentHandler, ratelimiter)
-	subjectRepository := subjects.NewPostgresSubjectRepository(pool)
-	subjectService := subjects.NewDefaultSubjectService(subjectRepository, assignmentRepository, txManager)
-	subjectHandler := subjectsapi.NewSubjectHandler(subjectService, assignmentService)
-	subjectsapi.SubjectRoutes(service, subjectHandler, ratelimiter)
-	conditionSetService := conditions.NewDefaultConditionSetService(conditionSetRepository, resourceService)
-	conditionSetHandler := conditionsapi.NewConditionSetHandler(conditionSetService)
-	conditionsapi.ConditionSetRoutes(service, conditionSetHandler, ratelimiter)
-	ruleService := conditions.NewDefaultRuleService(ruleRepository, conditionSetRepository, resourceService)
-	ruleHandler := conditionsapi.NewRuleHandler(ruleService)
-	conditionsapi.RuleRoutes(service, ruleHandler, ratelimiter)
-	checkService := check.NewDefaultCheckService(resourceRepository, instanceRepository, subjectRepository,
-		roleRepository, assignmentRepository, conditionSetRepository, ruleRepository, logger,
-		config.DecisionLogEnabled)
+	checkService := check.NewDefaultCheckService(resourceRepository, roleRepository, assignmentRepository,
+		logger, config.DecisionLogEnabled)
 	checkHandler := checkapi.NewCheckHandler(checkService)
 	checkapi.CheckRoutes(service, checkHandler, ratelimiter)
 

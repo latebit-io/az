@@ -6,4 +6,5 @@ func AssignmentRoutes(e *echo.Echo, handler AssignmentHandler, middleware ...ech
 	e.POST("/api/assignments", handler.Assign, middleware...)
 	e.POST("/api/assignments/list", handler.List, middleware...)
 	e.PUT("/api/assignments/delete", handler.Unassign, middleware...)
+	e.POST("/api/subjects/roles", handler.SubjectRoles, middleware...)
 }

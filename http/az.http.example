@@ -14,10 +14,7 @@ Content-Type: application/json
 {
   "tenantId": "default",
   "key": "document",
-  "name": "Document",
-  "description": "documents",
-  "actions": ["read", "write", "delete"],
-  "attributes": [{"key": "public", "type": "bool"}]
+  "actions": ["read", "write", "delete"]
 }
 
 ### Get a resource type
@@ -37,26 +34,14 @@ Content-Type: application/json
   "tenantId": "default"
 }
 
-### Create a resource instance
-POST {{host}}/api/resources/instances
+### Update a resource type's actions
+PUT {{host}}/api/resources
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "resourceType": "document",
-  "key": "doc-1",
-  "attributes": {"public": true}
-}
-
-### Create a subject
-POST {{host}}/api/subjects
-Content-Type: application/json
-
-{
-  "tenantId": "default",
-  "key": "user@example.com",
-  "email": "user@example.com",
-  "attributes": {"department": "engineering"}
+  "key": "document",
+  "actions": ["read", "write", "delete", "share"]
 }
 
 ### Create a role
@@ -74,6 +59,14 @@ Content-Type: application/json
   ]
 }
 
+### List roles
+POST {{host}}/api/roles/list
+Content-Type: application/json
+
+{
+  "tenantId": "default"
+}
+
 ### Assign a role
 POST {{host}}/api/assignments
 Content-Type: application/json
@@ -82,6 +75,15 @@ Content-Type: application/json
   "tenantId": "default",
   "subject": "user@example.com",
   "role": "editor"
+}
+
+### List assignments (filter by subject and/or role)
+POST {{host}}/api/assignments/list
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com"
 }
 
 ### Roles for a subject (for JWT roles claim)
@@ -93,62 +95,15 @@ Content-Type: application/json
   "key": "user@example.com"
 }
 
-### Create a subject condition set
-POST {{host}}/api/conditionsets
-Content-Type: application/json
-
-{
-  "tenantId": "default",
-  "key": "engineers",
-  "name": "Engineers",
-  "type": "subject",
-  "conditions": {"attribute": "department", "operator": "equals", "value": "engineering"}
-}
-
-### Create a resource condition set
-POST {{host}}/api/conditionsets
-Content-Type: application/json
-
-{
-  "tenantId": "default",
-  "key": "public-docs",
-  "name": "Public documents",
-  "type": "resource",
-  "resourceType": "document",
-  "conditions": {"attribute": "public", "operator": "equals", "value": true}
-}
-
-### Create a condition set rule (engineers may read public docs)
-POST {{host}}/api/conditionsets/rules
-Content-Type: application/json
-
-{
-  "tenantId": "default",
-  "subjectSet": "engineers",
-  "permission": {"resource": "document", "action": "read"},
-  "resourceSet": "public-docs"
-}
-
-### Check (RBAC)
+### Check
 POST {{host}}/api/check
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "subject": {"key": "user@example.com"},
+  "subject": "user@example.com",
   "action": "write",
-  "resource": {"type": "document"}
-}
-
-### Check (ABAC with inline attributes)
-POST {{host}}/api/check
-Content-Type: application/json
-
-{
-  "tenantId": "default",
-  "subject": {"key": "someone-else", "attributes": {"department": "engineering"}},
-  "action": "read",
-  "resource": {"type": "document", "key": "doc-1"}
+  "resource": "document"
 }
 
 ### Bulk check
@@ -158,7 +113,35 @@ Content-Type: application/json
 {
   "tenantId": "default",
   "checks": [
-    {"subject": {"key": "user@example.com"}, "action": "write", "resource": {"type": "document"}},
-    {"subject": {"key": "user@example.com"}, "action": "delete", "resource": {"type": "document"}}
+    {"subject": "user@example.com", "action": "write", "resource": "document"},
+    {"subject": "user@example.com", "action": "delete", "resource": "document"}
   ]
+}
+
+### Remove an assignment
+PUT {{host}}/api/assignments/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com",
+  "role": "editor"
+}
+
+### Delete a role (cascades its assignments)
+PUT {{host}}/api/roles/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "editor"
+}
+
+### Delete a resource type (409 while roles reference it)
+PUT {{host}}/api/resources/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "document"
 }

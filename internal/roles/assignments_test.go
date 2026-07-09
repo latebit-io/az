@@ -16,7 +16,7 @@ func newAssignmentFixture(t *testing.T) (AssignmentService, RoleService, context
 	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), resourceService)
 	assignmentService := NewDefaultAssignmentService(NewPostgresAssignmentRepository(pool))
 	ctx := context.Background()
-	require.NoError(t, resourceService.Create(ctx, "default", "document", "Document", "", []string{"read"}, nil))
+	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read"}))
 	require.NoError(t, roleService.Create(ctx, "default", "viewer", "Viewer", "",
 		[]Permission{{Resource: "document", Action: "read"}}))
 	require.NoError(t, roleService.Create(ctx, "default", "admin", "Admin", "", nil))

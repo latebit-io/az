@@ -9,12 +9,10 @@ import (
 )
 
 type Tenant struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Domain      string    `json:"domain"`
-	Created     time.Time `json:"created"`
-	Modified    time.Time `json:"modified"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Created  time.Time `json:"created"`
+	Modified time.Time `json:"modified"`
 }
 
 type TenantRepository interface {
@@ -41,7 +39,7 @@ func NewPostgresTenantRepository(pool *pgxpool.Pool) TenantRepository {
 
 func (t *PostgresTenantRepository) ReadAll(ctx context.Context) ([]Tenant, error) {
 	querier := utils.QuerierFrom(ctx, t.pool)
-	rows, err := querier.Query(ctx, "SELECT id, name, description, domain, created, modified FROM tenants")
+	rows, err := querier.Query(ctx, "SELECT id, name, created, modified FROM tenants")
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +48,7 @@ func (t *PostgresTenantRepository) ReadAll(ctx context.Context) ([]Tenant, error
 	var tenants []Tenant
 	for rows.Next() {
 		var tenant Tenant
-		if err := rows.Scan(&tenant.ID, &tenant.Name, &tenant.Description, &tenant.Domain, &tenant.Created,
-			&tenant.Modified); err != nil {
+		if err := rows.Scan(&tenant.ID, &tenant.Name, &tenant.Created, &tenant.Modified); err != nil {
 			return tenants, err
 		}
 		tenants = append(tenants, tenant)
@@ -62,8 +59,8 @@ func (t *PostgresTenantRepository) ReadAll(ctx context.Context) ([]Tenant, error
 func (t *PostgresTenantRepository) Read(ctx context.Context, tenantID string) (*Tenant, error) {
 	querier := utils.QuerierFrom(ctx, t.pool)
 	var tenant Tenant
-	err := querier.QueryRow(ctx, "SELECT id, name, description, domain, created, modified FROM tenants WHERE id = $1",
-		tenantID).Scan(&tenant.ID, &tenant.Name, &tenant.Description, &tenant.Domain, &tenant.Created, &tenant.Modified)
+	err := querier.QueryRow(ctx, "SELECT id, name, created, modified FROM tenants WHERE id = $1",
+		tenantID).Scan(&tenant.ID, &tenant.Name, &tenant.Created, &tenant.Modified)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +69,7 @@ func (t *PostgresTenantRepository) Read(ctx context.Context, tenantID string) (*
 
 func (t *PostgresTenantRepository) Create(ctx context.Context) error {
 	querier := utils.QuerierFrom(ctx, t.pool)
-	_, err := querier.Exec(ctx, "INSERT INTO tenants (id, name, description) VALUES ($1, $2, $3)",
-		"default", "default", "default")
+	_, err := querier.Exec(ctx, "INSERT INTO tenants (id, name) VALUES ($1, $2)", "default", "default")
 	return err
 }
 

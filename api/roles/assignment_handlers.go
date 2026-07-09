@@ -26,6 +26,15 @@ type ListAssignmentsRequest struct {
 	Role     string `json:"role"`
 }
 
+type SubjectRolesRequest struct {
+	TenantID string `json:"tenantId"`
+	Key      string `json:"key"`
+}
+
+type SubjectRolesResponse struct {
+	Roles []string `json:"roles"`
+}
+
 func NewAssignmentHandler(service roles.AssignmentService) AssignmentHandler {
 	return AssignmentHandler{service}
 }
@@ -80,6 +89,27 @@ func (ah AssignmentHandler) Unassign(c *echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+// SubjectRoles returns the role keys assigned to a subject — the payload
+// BulwarkAuth embeds as the JWT roles claim at token issuance.
+func (ah AssignmentHandler) SubjectRoles(c *echo.Context) error {
+	request := new(SubjectRolesRequest)
+	if err := c.Bind(request); err != nil {
+		httpError := problem.NewBadRequest(err)
+		return c.JSON(httpError.Status, httpError)
+	}
+
+	roleKeys, err := ah.assignments.RolesForSubject(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+		request.Key)
+	if err != nil {
+		return assignmentProblem(c, err)
+	}
+	if roleKeys == nil {
+		roleKeys = []string{}
+	}
+
+	return c.JSON(http.StatusOK, SubjectRolesResponse{Roles: roleKeys})
 }
 
 func assignmentProblem(c *echo.Context, err error) error {

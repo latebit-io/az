@@ -61,9 +61,8 @@ func TestFullAuthorizationFlow(t *testing.T) {
 
 	// resource type
 	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenant, "key": "document", "name": "Document",
-		"actions":    []string{"read", "write", "delete"},
-		"attributes": []map[string]string{{"key": "public", "type": "bool"}},
+		"tenantId": tenant, "key": "document",
+		"actions": []string{"read", "write", "delete"},
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
@@ -96,13 +95,10 @@ func TestFullAuthorizationFlow(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, []string{"editor"}, rolesResponse.Roles)
 
-	// RBAC checks
+	// checks
 	var allowDecision decision
 	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant,
-		"subject":  map[string]any{"key": "alice@example.com"},
-		"action":   "write",
-		"resource": map[string]any{"type": "document"},
+		"tenantId": tenant, "subject": "alice@example.com", "action": "write", "resource": "document",
 	}, &allowDecision)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
@@ -110,76 +106,11 @@ func TestFullAuthorizationFlow(t *testing.T) {
 
 	var denyDecision decision
 	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant,
-		"subject":  map[string]any{"key": "alice@example.com"},
-		"action":   "delete",
-		"resource": map[string]any{"type": "document"},
+		"tenantId": tenant, "subject": "alice@example.com", "action": "delete", "resource": "document",
 	}, &denyDecision)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	assert.False(t, denyDecision.Allow, denyDecision.Reason)
-
-	// ABAC: subject set, resource set, rule
-	status, err = az.post("/api/subjects", map[string]any{
-		"tenantId": tenant, "key": "carol@example.com",
-		"attributes": map[string]any{"department": "engineering"},
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
-
-	status, err = az.post("/api/resources/instances", map[string]any{
-		"tenantId": tenant, "resourceType": "document", "key": "doc-1",
-		"attributes": map[string]any{"public": true},
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
-
-	status, err = az.post("/api/conditionsets", map[string]any{
-		"tenantId": tenant, "key": "engineers", "name": "Engineers", "type": "subject",
-		"conditions": map[string]any{"attribute": "department", "operator": "equals", "value": "engineering"},
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
-
-	status, err = az.post("/api/conditionsets", map[string]any{
-		"tenantId": tenant, "key": "public-docs", "name": "Public docs", "type": "resource",
-		"resourceType": "document",
-		"conditions":   map[string]any{"attribute": "public", "operator": "equals", "value": true},
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
-
-	status, err = az.post("/api/conditionsets/rules", map[string]any{
-		"tenantId": tenant, "subjectSet": "engineers",
-		"permission":  map[string]string{"resource": "document", "action": "read"},
-		"resourceSet": "public-docs",
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
-
-	// ABAC checks: stored attributes
-	var abacDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant,
-		"subject":  map[string]any{"key": "carol@example.com"},
-		"action":   "read",
-		"resource": map[string]any{"type": "document", "key": "doc-1"},
-	}, &abacDecision)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	assert.True(t, abacDecision.Allow, abacDecision.Reason)
-
-	// ABAC: inline attributes flip the decision
-	var inlineDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant,
-		"subject":  map[string]any{"key": "carol@example.com", "attributes": map[string]any{"department": "sales"}},
-		"action":   "read",
-		"resource": map[string]any{"type": "document", "key": "doc-1"},
-	}, &inlineDecision)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	assert.False(t, inlineDecision.Allow, inlineDecision.Reason)
 
 	// bulk
 	var bulk struct {
@@ -188,10 +119,8 @@ func TestFullAuthorizationFlow(t *testing.T) {
 	status, err = az.post("/api/check/bulk", map[string]any{
 		"tenantId": tenant,
 		"checks": []map[string]any{
-			{"subject": map[string]any{"key": "alice@example.com"}, "action": "write",
-				"resource": map[string]any{"type": "document"}},
-			{"subject": map[string]any{"key": "alice@example.com"}, "action": "delete",
-				"resource": map[string]any{"type": "document"}},
+			{"subject": "alice@example.com", "action": "write", "resource": "document"},
+			{"subject": "alice@example.com", "action": "delete", "resource": "document"},
 		},
 	}, &bulk)
 	require.NoError(t, err)
@@ -200,34 +129,14 @@ func TestFullAuthorizationFlow(t *testing.T) {
 	assert.True(t, bulk.Results[0].Allow)
 	assert.False(t, bulk.Results[1].Allow)
 
-	// referenced deletes are refused
-	status, err = az.put("/api/conditionsets/delete", map[string]any{
-		"tenantId": tenant, "key": "engineers",
-	}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusConflict, status)
-
+	// referenced resource type cannot be deleted
 	status, err = az.put("/api/resources/delete", map[string]any{
 		"tenantId": tenant, "key": "document",
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, status)
 
-	// unwind: rule -> sets -> role (assignments cascade) -> resource type
-	status, err = az.put("/api/conditionsets/rules/delete", map[string]any{
-		"tenantId": tenant, "subjectSet": "engineers",
-		"permission":  map[string]string{"resource": "document", "action": "read"},
-		"resourceSet": "public-docs",
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNoContent, status)
-
-	for _, key := range []string{"engineers", "public-docs"} {
-		status, err = az.put("/api/conditionsets/delete", map[string]any{"tenantId": tenant, "key": key}, nil)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusNoContent, status)
-	}
-
+	// unwind: role (assignments cascade) -> resource type
 	status, err = az.put("/api/roles/delete", map[string]any{"tenantId": tenant, "key": "editor"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, status)
@@ -242,7 +151,7 @@ func TestTenantIsolation(t *testing.T) {
 	tenantB := newTenant()
 
 	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenantA, "key": "widget", "name": "Widget", "actions": []string{"use"},
+		"tenantId": tenantA, "key": "widget", "actions": []string{"use"},
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
@@ -263,10 +172,7 @@ func TestTenantIsolation(t *testing.T) {
 	// allowed in tenant A
 	var allowDecision decision
 	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenantA,
-		"subject":  map[string]any{"key": "alice"},
-		"action":   "use",
-		"resource": map[string]any{"type": "widget"},
+		"tenantId": tenantA, "subject": "alice", "action": "use", "resource": "widget",
 	}, &allowDecision)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
@@ -275,10 +181,7 @@ func TestTenantIsolation(t *testing.T) {
 	// denied in tenant B — the resource type does not even exist there
 	var denyDecision decision
 	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenantB,
-		"subject":  map[string]any{"key": "alice"},
-		"action":   "use",
-		"resource": map[string]any{"type": "widget"},
+		"tenantId": tenantB, "subject": "alice", "action": "use", "resource": "widget",
 	}, &denyDecision)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
@@ -294,16 +197,11 @@ func TestProblemDetailsShape(t *testing.T) {
 		Status int    `json:"status"`
 		Detail string `json:"detail"`
 	}
-	status, err := az.do(http.MethodPost, "/api/resources/get",
-		map[string]any{"tenantId": tenant, "key": "missing"}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNotFound, status)
-
-	// decode the error body separately since do() skips decoding on >=300
 	request := map[string]any{"tenantId": tenant, "key": "missing"}
 	response, err := az.rawPost("/api/resources/get", request)
 	require.NoError(t, err)
 	defer response.Body.Close()
+	require.Equal(t, http.StatusNotFound, response.StatusCode)
 	require.NoError(t, jsonDecode(response, &details))
 	assert.Equal(t, http.StatusNotFound, details.Status)
 	assert.Equal(t, "https://latebit.io/az/errors/", details.Type)
