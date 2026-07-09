@@ -15,158 +15,167 @@ func TestMain(m *testing.M) {
 	os.Exit(utils.RunTestMain(m))
 }
 
-func newRoleFixture(t *testing.T) (RoleService, resources.ResourceService, context.Context) {
+func newRoleFixture(t *testing.T) (RoleService, resources.ResourceService, *resources.ResourceType, context.Context) {
 	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
-	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), utils.NewPostgresTxManager(pool))
+	txManager := utils.NewPostgresTxManager(pool)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
+		txManager)
+	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), txManager)
 	ctx := context.Background()
-	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write", "delete"}))
-	return roleService, resourceService, ctx
+	document, err := resourceService.Create(ctx, "default", "document", []string{"read", "write", "delete"})
+	require.NoError(t, err)
+	return roleService, resourceService, document, ctx
 }
 
 func TestRoleService_CreateAndGet(t *testing.T) {
-	service, _, ctx := newRoleFixture(t)
+	service, _, _, ctx := newRoleFixture(t)
 
-	err := service.Create(ctx, "default", "editor", "Editor", "can edit documents",
+	created, err := service.Create(ctx, "default", "Editor",
 		[]Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}})
 	require.NoError(t, err)
+	require.NotEmpty(t, created.ID)
 
-	role, err := service.Get(ctx, "default", "editor")
+	role, err := service.Get(ctx, "default", created.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "editor", role.Key)
+	assert.Equal(t, created.ID, role.ID)
+	assert.Equal(t, "Editor", role.Name)
 	assert.Equal(t, []Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}},
 		role.Permissions)
 }
 
 func TestRoleService_GrantValidation(t *testing.T) {
-	service, _, ctx := newRoleFixture(t)
+	service, _, _, ctx := newRoleFixture(t)
 
-	err := service.Create(ctx, "default", "editor", "Editor", "",
-		[]Permission{{Resource: "missing", Action: "read"}})
+	_, err := service.Create(ctx, "default", "Editor", []Permission{{Resource: "missing", Action: "read"}})
 	var invalidPermission InvalidPermissionError
 	require.ErrorAs(t, err, &invalidPermission)
 	assert.Equal(t, "missing", invalidPermission.Resource)
 
-	err = service.Create(ctx, "default", "editor", "Editor", "",
-		[]Permission{{Resource: "document", Action: "share"}})
+	_, err = service.Create(ctx, "default", "Editor", []Permission{{Resource: "document", Action: "share"}})
 	require.ErrorAs(t, err, &invalidPermission)
 	assert.Equal(t, "share", invalidPermission.Action)
 
-	// a failed create must not leave a partial role behind
-	_, err = service.Get(ctx, "default", "editor")
-	var notFound RoleNotFoundError
-	assert.ErrorAs(t, err, &notFound)
-
-	err = service.Create(ctx, "default", "Bad Key", "Editor", "", nil)
+	_, err = service.Create(ctx, "default", "", nil)
 	var invalidRole InvalidRoleError
 	assert.ErrorAs(t, err, &invalidRole)
 
-	err = service.Create(ctx, "default", "editor", "", "", nil)
-	assert.ErrorAs(t, err, &invalidRole)
+	// a failed create must not leave a partial role behind
+	roleList, err := service.List(ctx, "default")
+	require.NoError(t, err)
+	assert.Empty(t, roleList)
 }
 
-func TestRoleService_Duplicate(t *testing.T) {
-	service, _, ctx := newRoleFixture(t)
+func TestRoleService_DuplicateName(t *testing.T) {
+	service, _, _, ctx := newRoleFixture(t)
 
-	require.NoError(t, service.Create(ctx, "default", "editor", "Editor", "", nil))
-	err := service.Create(ctx, "default", "editor", "Editor", "", nil)
+	_, err := service.Create(ctx, "default", "Editor", nil)
+	require.NoError(t, err)
+	_, err = service.Create(ctx, "default", "Editor", nil)
 	var duplicate RoleDuplicateError
 	assert.ErrorAs(t, err, &duplicate)
+
+	// same name in another tenant is fine
+	_, err = service.Create(ctx, "other", "Editor", nil)
+	assert.NoError(t, err)
 }
 
 func TestRoleService_ListUpdateDelete(t *testing.T) {
-	service, _, ctx := newRoleFixture(t)
+	service, _, _, ctx := newRoleFixture(t)
 
-	require.NoError(t, service.Create(ctx, "default", "editor", "Editor", "", nil))
-	require.NoError(t, service.Create(ctx, "default", "admin", "Admin", "", nil))
+	editor, err := service.Create(ctx, "default", "Editor", nil)
+	require.NoError(t, err)
+	_, err = service.Create(ctx, "default", "Admin", nil)
+	require.NoError(t, err)
 
 	roleList, err := service.List(ctx, "default")
 	require.NoError(t, err)
 	require.Len(t, roleList, 2)
-	assert.Equal(t, "admin", roleList[0].Key)
+	assert.Equal(t, "Admin", roleList[0].Name)
 
-	err = service.Update(ctx, "default", "editor", "Editors", "updated",
+	err = service.Update(ctx, "default", editor.ID, "Editors",
 		[]Permission{{Resource: "document", Action: "read"}})
 	require.NoError(t, err)
-	role, err := service.Get(ctx, "default", "editor")
+	role, err := service.Get(ctx, "default", editor.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Editors", role.Name)
 	assert.Len(t, role.Permissions, 1)
 
-	require.NoError(t, service.Delete(ctx, "default", "editor"))
-	_, err = service.Get(ctx, "default", "editor")
+	require.NoError(t, service.Delete(ctx, "default", editor.ID))
+	_, err = service.Get(ctx, "default", editor.ID)
 	var notFound RoleNotFoundError
 	assert.ErrorAs(t, err, &notFound)
+
+	err = service.Delete(ctx, "default", "not-a-uuid")
+	var invalidRole InvalidRoleError
+	assert.ErrorAs(t, err, &invalidRole)
 }
 
 func TestResourceTypeDeleteBlockedByRoleReference(t *testing.T) {
-	pool := utils.NewTestPool(t)
-	roleRepo := NewPostgresRoleRepository(pool)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
-		utils.NewPostgresTxManager(pool))
-	roleService := NewDefaultRoleService(roleRepo, utils.NewPostgresTxManager(pool))
-	ctx := context.Background()
+	service, resourceService, document, ctx := newRoleFixture(t)
 
-	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read"}))
-	require.NoError(t, roleService.Create(ctx, "default", "viewer", "Viewer", "",
-		[]Permission{{Resource: "document", Action: "read"}}))
+	viewer, err := service.Create(ctx, "default", "Viewer", []Permission{{Resource: "document", Action: "read"}})
+	require.NoError(t, err)
 
-	err := resourceService.Delete(ctx, "default", "document")
+	err = resourceService.Delete(ctx, "default", document.ID)
 	var referenced resources.ResourceTypeReferencedError
 	assert.ErrorAs(t, err, &referenced)
 
-	require.NoError(t, roleService.Delete(ctx, "default", "viewer"))
-	assert.NoError(t, resourceService.Delete(ctx, "default", "document"))
+	require.NoError(t, service.Delete(ctx, "default", viewer.ID))
+	assert.NoError(t, resourceService.Delete(ctx, "default", document.ID))
 }
 
 func TestResourceTypeActionRemovalBlockedByRoleReference(t *testing.T) {
-	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
-		utils.NewPostgresTxManager(pool))
-	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), utils.NewPostgresTxManager(pool))
-	ctx := context.Background()
+	service, resourceService, document, ctx := newRoleFixture(t)
 
-	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))
-	require.NoError(t, roleService.Create(ctx, "default", "editor", "Editor", "",
-		[]Permission{{Resource: "document", Action: "write"}}))
+	_, err := service.Create(ctx, "default", "Editor", []Permission{{Resource: "document", Action: "write"}})
+	require.NoError(t, err)
 
 	// removing the granted action is refused
-	err := resourceService.Update(ctx, "default", "document", []string{"read"})
+	err = resourceService.Update(ctx, "default", document.ID, "document", []string{"read"})
 	var referenced resources.ResourceTypeReferencedError
 	assert.ErrorAs(t, err, &referenced)
 
 	// removing an ungranted action is fine
-	assert.NoError(t, resourceService.Update(ctx, "default", "document", []string{"write"}))
+	assert.NoError(t, resourceService.Update(ctx, "default", document.ID, "document", []string{"write"}))
 }
 
-func TestRoleRepository_AnyGrants(t *testing.T) {
+func TestRoleRepository_SubjectGrant(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
+	txManager := utils.NewPostgresTxManager(pool)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
+		txManager)
 	repo := NewPostgresRoleRepository(pool)
-	service := NewDefaultRoleService(repo, utils.NewPostgresTxManager(pool))
+	service := NewDefaultRoleService(repo, txManager)
+	assignmentService := NewDefaultAssignmentService(NewPostgresAssignmentRepository(pool))
 	ctx := context.Background()
 
-	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))
-	require.NoError(t, service.Create(ctx, "default", "viewer", "Viewer", "",
-		[]Permission{{Resource: "document", Action: "read"}}))
-	require.NoError(t, service.Create(ctx, "default", "editor", "Editor", "",
-		[]Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}}))
+	document, err := resourceService.Create(ctx, "default", "document", []string{"read", "write"})
+	require.NoError(t, err)
+	viewer, err := service.Create(ctx, "default", "Viewer", []Permission{{Resource: "document", Action: "read"}})
+	require.NoError(t, err)
+	editor, err := service.Create(ctx, "default", "Editor",
+		[]Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}})
+	require.NoError(t, err)
 
-	roleKey, granted, err := repo.AnyGrants(ctx, "default", []string{"viewer", "editor"}, "document", "write")
+	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", viewer.ID))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", editor.ID))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "bob", viewer.ID))
+
+	roleName, granted, err := repo.SubjectGrant(ctx, "default", "alice", document.ID, "write")
 	require.NoError(t, err)
 	assert.True(t, granted)
-	assert.Equal(t, "editor", roleKey)
+	assert.Equal(t, "Editor", roleName)
 
-	_, granted, err = repo.AnyGrants(ctx, "default", []string{"viewer"}, "document", "write")
+	_, granted, err = repo.SubjectGrant(ctx, "default", "bob", document.ID, "write")
 	require.NoError(t, err)
 	assert.False(t, granted)
 
-	_, granted, err = repo.AnyGrants(ctx, "default", nil, "document", "read")
+	_, granted, err = repo.SubjectGrant(ctx, "default", "nobody", document.ID, "read")
 	require.NoError(t, err)
 	assert.False(t, granted)
 
 	// tenant isolation
-	_, granted, err = repo.AnyGrants(ctx, "other", []string{"editor"}, "document", "write")
+	_, granted, err = repo.SubjectGrant(ctx, "other", "alice", document.ID, "write")
 	require.NoError(t, err)
 	assert.False(t, granted)
 }

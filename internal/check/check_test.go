@@ -33,22 +33,23 @@ func newCheckFixture(t *testing.T) (CheckService, context.Context) {
 	resourceService := resources.NewDefaultResourceService(resourceRepo, utils.NewPostgresTxManager(pool))
 	roleRepo := roles.NewPostgresRoleRepository(pool)
 	roleService := roles.NewDefaultRoleService(roleRepo, utils.NewPostgresTxManager(pool))
-	assignmentRepo := roles.NewPostgresAssignmentRepository(pool)
-	assignmentService := roles.NewDefaultAssignmentService(assignmentRepo)
+	assignmentService := roles.NewDefaultAssignmentService(roles.NewPostgresAssignmentRepository(pool))
 
-	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))
-	require.NoError(t, resourceService.Create(ctx, "default", "report", []string{"read"}))
+	{ _, err := resourceService.Create(ctx, "default", "document", []string{"read", "write"}); require.NoError(t, err) }
+	{ _, err := resourceService.Create(ctx, "default", "report", []string{"read"}); require.NoError(t, err) }
 
-	require.NoError(t, roleService.Create(ctx, "default", "viewer", "Viewer", "",
-		[]roles.Permission{{Resource: "document", Action: "read"}}))
-	require.NoError(t, roleService.Create(ctx, "default", "editor", "Editor", "",
-		[]roles.Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}}))
+	viewer, err := roleService.Create(ctx, "default", "viewer",
+		[]roles.Permission{{Resource: "document", Action: "read"}})
+	require.NoError(t, err)
+	editor, err := roleService.Create(ctx, "default", "editor",
+		[]roles.Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}})
+	require.NoError(t, err)
 
-	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", "editor"))
-	require.NoError(t, assignmentService.Assign(ctx, "default", "bob", "viewer"))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", editor.ID))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "bob", viewer.ID))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	checkService := NewDefaultCheckService(resourceRepo, roleRepo, assignmentRepo, logger, true)
+	checkService := NewDefaultCheckService(resourceRepo, roleRepo, logger, true)
 	return checkService, ctx
 }
 

@@ -10,11 +10,13 @@ import (
 
 // ResourceType defines a protectable resource and the actions that exist on
 // it. Permissions are resource:action pairs derived from these definitions;
-// role grants reference them by foreign key.
+// role grants reference them by foreign key. Resource types are addressed by
+// their uuid id; name is the unique per-tenant handle used in permission
+// grants and check requests.
 type ResourceType struct {
 	ID       string    `json:"id"`
 	TenantID string    `json:"tenantId"`
-	Key      string    `json:"key"`
+	Name     string    `json:"name"`
 	Actions  []string  `json:"actions"`
 	Created  time.Time `json:"created"`
 	Modified time.Time `json:"modified"`
@@ -31,11 +33,11 @@ func (rt ResourceType) HasAction(action string) bool {
 }
 
 type ResourceService interface {
-	Create(ctx context.Context, tenantID, key string, actions []string) error
-	Get(ctx context.Context, tenantID, key string) (*ResourceType, error)
+	Create(ctx context.Context, tenantID, name string, actions []string) (*ResourceType, error)
+	Get(ctx context.Context, tenantID, id string) (*ResourceType, error)
 	List(ctx context.Context, tenantID string) ([]ResourceType, error)
-	Update(ctx context.Context, tenantID, key string, actions []string) error
-	Delete(ctx context.Context, tenantID, key string) error
+	Update(ctx context.Context, tenantID, id, name string, actions []string) error
+	Delete(ctx context.Context, tenantID, id string) error
 }
 
 type DefaultResourceService struct {
@@ -47,39 +49,53 @@ func NewDefaultResourceService(repo ResourceTypeRepository, txManager utils.TxMa
 	return &DefaultResourceService{repo: repo, txManager: txManager}
 }
 
-func (s *DefaultResourceService) Create(ctx context.Context, tenantID, key string, actions []string) error {
-	actions, err := validateResourceType(key, actions)
+// Create stores the resource type and its actions in one transaction and
+// returns the type with its generated id.
+func (s *DefaultResourceService) Create(ctx context.Context, tenantID, name string,
+	actions []string) (*ResourceType, error) {
+	actions, err := validateResourceType(name, actions)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
-		return s.repo.Create(txCtx, ResourceType{
+	var created *ResourceType
+	err = s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		var err error
+		created, err = s.repo.Create(txCtx, ResourceType{
 			TenantID: tenantID,
-			Key:      key,
+			Name:     name,
 			Actions:  actions,
 		})
+		return err
 	})
+	return created, err
 }
 
-func (s *DefaultResourceService) Get(ctx context.Context, tenantID, key string) (*ResourceType, error) {
-	return s.repo.Read(ctx, tenantID, key)
+func (s *DefaultResourceService) Get(ctx context.Context, tenantID, id string) (*ResourceType, error) {
+	if err := utils.ValidateUUID(id); err != nil {
+		return nil, InvalidResourceTypeError{Value: "invalid resource type id"}
+	}
+	return s.repo.Read(ctx, tenantID, id)
 }
 
 func (s *DefaultResourceService) List(ctx context.Context, tenantID string) ([]ResourceType, error) {
 	return s.repo.ReadAll(ctx, tenantID)
 }
 
-// Update replaces the declared actions. Removing an action that a role still
-// grants is refused (foreign key RESTRICT).
-func (s *DefaultResourceService) Update(ctx context.Context, tenantID, key string, actions []string) error {
-	actions, err := validateResourceType(key, actions)
+// Update replaces the name and the declared actions. Removing an action that
+// a role still grants is refused (foreign key RESTRICT).
+func (s *DefaultResourceService) Update(ctx context.Context, tenantID, id, name string, actions []string) error {
+	if err := utils.ValidateUUID(id); err != nil {
+		return InvalidResourceTypeError{Value: "invalid resource type id"}
+	}
+	actions, err := validateResourceType(name, actions)
 	if err != nil {
 		return err
 	}
 	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
 		return s.repo.Update(txCtx, ResourceType{
+			ID:       id,
 			TenantID: tenantID,
-			Key:      key,
+			Name:     name,
 			Actions:  actions,
 		})
 	})
@@ -87,14 +103,17 @@ func (s *DefaultResourceService) Update(ctx context.Context, tenantID, key strin
 
 // Delete removes a resource type and its actions (FK cascade). Refused while
 // any role permission still references an action (FK RESTRICT).
-func (s *DefaultResourceService) Delete(ctx context.Context, tenantID, key string) error {
-	return s.repo.Delete(ctx, tenantID, key)
+func (s *DefaultResourceService) Delete(ctx context.Context, tenantID, id string) error {
+	if err := utils.ValidateUUID(id); err != nil {
+		return InvalidResourceTypeError{Value: "invalid resource type id"}
+	}
+	return s.repo.Delete(ctx, tenantID, id)
 }
 
-// validateResourceType checks keys and returns the deduplicated action list.
-func validateResourceType(key string, actions []string) ([]string, error) {
-	if err := utils.ValidateKey(key); err != nil {
-		return nil, InvalidResourceTypeError{Value: fmt.Sprintf("key '%s': %s", key, err)}
+// validateResourceType checks names and returns the deduplicated action list.
+func validateResourceType(name string, actions []string) ([]string, error) {
+	if err := utils.ValidateKey(name); err != nil {
+		return nil, InvalidResourceTypeError{Value: fmt.Sprintf("name '%s': %s", name, err)}
 	}
 	if len(actions) == 0 {
 		return nil, InvalidResourceTypeError{Value: "at least one action is required"}

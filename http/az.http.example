@@ -7,13 +7,13 @@
 ### Health
 GET {{host}}/health
 
-### Create a resource type
+### Create a resource type (response includes the generated id)
 POST {{host}}/api/resources
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "document",
+  "name": "document",
   "actions": ["read", "write", "delete"]
 }
 
@@ -23,7 +23,7 @@ Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "document"
+  "id": "00000000-0000-0000-0000-000000000000"
 }
 
 ### List resource types
@@ -34,25 +34,24 @@ Content-Type: application/json
   "tenantId": "default"
 }
 
-### Update a resource type's actions
+### Update a resource type's name and actions
 PUT {{host}}/api/resources
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "document",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "name": "document",
   "actions": ["read", "write", "delete", "share"]
 }
 
-### Create a role
+### Create a role (response includes the generated id)
 POST {{host}}/api/roles
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "editor",
-  "name": "Editor",
-  "description": "can read and write documents",
+  "name": "editor",
   "permissions": [
     {"resource": "document", "action": "read"},
     {"resource": "document", "action": "write"}
@@ -67,14 +66,14 @@ Content-Type: application/json
   "tenantId": "default"
 }
 
-### Assign a role
+### Assign a role (use the id returned by role create)
 POST {{host}}/api/assignments
 Content-Type: application/json
 
 {
   "tenantId": "default",
   "subject": "user@example.com",
-  "role": "editor"
+  "roleId": "00000000-0000-0000-0000-000000000000"
 }
 
 ### List assignments (filter by subject and/or role)
@@ -125,16 +124,16 @@ Content-Type: application/json
 {
   "tenantId": "default",
   "subject": "user@example.com",
-  "role": "editor"
+  "roleId": "00000000-0000-0000-0000-000000000000"
 }
 
-### Delete a role (cascades its assignments)
+### Delete a role (cascades its grants and assignments)
 PUT {{host}}/api/roles/delete
 Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "editor"
+  "id": "00000000-0000-0000-0000-000000000000"
 }
 
 ### Delete a resource type (409 while roles reference it)
@@ -143,5 +142,5 @@ Content-Type: application/json
 
 {
   "tenantId": "default",
-  "key": "document"
+  "id": "00000000-0000-0000-0000-000000000000"
 }

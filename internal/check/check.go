@@ -32,7 +32,6 @@ type CheckService interface {
 type DefaultCheckService struct {
 	resourceTypes resources.ResourceTypeRepository
 	roles         roles.RoleRepository
-	assignments   roles.AssignmentRepository
 	logger        *slog.Logger
 	decisionLog   bool
 }
@@ -40,14 +39,12 @@ type DefaultCheckService struct {
 func NewDefaultCheckService(
 	resourceTypes resources.ResourceTypeRepository,
 	roleRepo roles.RoleRepository,
-	assignments roles.AssignmentRepository,
 	logger *slog.Logger,
 	decisionLog bool,
 ) CheckService {
 	return &DefaultCheckService{
 		resourceTypes: resourceTypes,
 		roles:         roleRepo,
-		assignments:   assignments,
 		logger:        logger,
 		decisionLog:   decisionLog,
 	}
@@ -99,8 +96,10 @@ func (s *DefaultCheckService) decide(ctx context.Context, tenantID string, reque
 		return Decision{}, InvalidCheckError{Value: "resource is required"}
 	}
 
-	// resolve the resource type; unknown type or action is a deny, not an error
-	resourceType, err := s.resourceTypes.Read(ctx, tenantID, request.Resource)
+	// resolve the resource type by name; unknown type or action is a deny,
+	// not an error
+	resourceTypeID, actionDeclared, err := s.resourceTypes.ResolveAction(ctx, tenantID, request.Resource,
+		request.Action)
 	var typeNotFound resources.ResourceTypeNotFoundError
 	if errors.As(err, &typeNotFound) {
 		return Decision{Allow: false, Reason: fmt.Sprintf("unknown resource type '%s'", request.Resource)}, nil
@@ -108,24 +107,18 @@ func (s *DefaultCheckService) decide(ctx context.Context, tenantID string, reque
 	if err != nil {
 		return Decision{}, err
 	}
-	if !resourceType.HasAction(request.Action) {
+	if !actionDeclared {
 		return Decision{Allow: false, Reason: fmt.Sprintf("unknown action '%s' for resource type '%s'",
 			request.Action, request.Resource)}, nil
 	}
 
-	roleKeys, err := s.assignments.RolesForSubject(ctx, tenantID, request.Subject)
+	roleName, granted, err := s.roles.SubjectGrant(ctx, tenantID, request.Subject, resourceTypeID, request.Action)
 	if err != nil {
 		return Decision{}, err
 	}
-	if len(roleKeys) > 0 {
-		roleKey, granted, err := s.roles.AnyGrants(ctx, tenantID, roleKeys, request.Resource, request.Action)
-		if err != nil {
-			return Decision{}, err
-		}
-		if granted {
-			return Decision{Allow: true, Reason: fmt.Sprintf("role '%s' grants %s:%s", roleKey,
-				request.Resource, request.Action)}, nil
-		}
+	if granted {
+		return Decision{Allow: true, Reason: fmt.Sprintf("role '%s' grants %s:%s", roleName,
+			request.Resource, request.Action)}, nil
 	}
 
 	return Decision{Allow: false, Reason: "no role grants this permission"}, nil

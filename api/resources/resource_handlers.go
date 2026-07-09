@@ -14,15 +14,22 @@ type ResourceHandler struct {
 	resources resources.ResourceService
 }
 
-type ResourceTypeRequest struct {
+type CreateResourceTypeRequest struct {
 	TenantID string   `json:"tenantId"`
-	Key      string   `json:"key"`
+	Name     string   `json:"name"`
+	Actions  []string `json:"actions"`
+}
+
+type UpdateResourceTypeRequest struct {
+	TenantID string   `json:"tenantId"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
 	Actions  []string `json:"actions"`
 }
 
 type GetResourceTypeRequest struct {
 	TenantID string `json:"tenantId"`
-	Key      string `json:"key"`
+	ID       string `json:"id"`
 }
 
 type ListResourceTypesRequest struct {
@@ -33,24 +40,25 @@ func NewResourceHandler(service resources.ResourceService) ResourceHandler {
 	return ResourceHandler{service}
 }
 
-// Create defines a new resource type with its actions.
+// Create defines a new resource type with its actions and returns it
+// including the generated id.
 func (rh ResourceHandler) Create(c *echo.Context) error {
-	request := new(ResourceTypeRequest)
+	request := new(CreateResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
 		httpError := problem.NewBadRequest(err)
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.resources.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key,
-		request.Actions)
+	resourceType, err := rh.resources.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+		request.Name, request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
 
-	return c.NoContent(http.StatusCreated)
+	return c.JSON(http.StatusCreated, resourceType)
 }
 
-// Get returns a single resource type by tenant and key.
+// Get returns a single resource type by id.
 func (rh ResourceHandler) Get(c *echo.Context) error {
 	request := new(GetResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
@@ -58,7 +66,7 @@ func (rh ResourceHandler) Get(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	resourceType, err := rh.resources.Get(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key)
+	resourceType, err := rh.resources.Get(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
@@ -82,16 +90,16 @@ func (rh ResourceHandler) List(c *echo.Context) error {
 	return c.JSON(http.StatusOK, resourceTypes)
 }
 
-// Update replaces a resource type's actions.
+// Update replaces a resource type's name and actions.
 func (rh ResourceHandler) Update(c *echo.Context) error {
-	request := new(ResourceTypeRequest)
+	request := new(UpdateResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
 		httpError := problem.NewBadRequest(err)
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.resources.Update(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key,
-		request.Actions)
+	err := rh.resources.Update(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID,
+		request.Name, request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
@@ -99,8 +107,8 @@ func (rh ResourceHandler) Update(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// Delete removes a resource type. Referenced resource types (roles, rules)
-// cannot be deleted.
+// Delete removes a resource type. Refused while roles still grant its
+// actions.
 func (rh ResourceHandler) Delete(c *echo.Context) error {
 	request := new(GetResourceTypeRequest)
 	if err := c.Bind(request); err != nil {
@@ -108,7 +116,7 @@ func (rh ResourceHandler) Delete(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.resources.Delete(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Key)
+	err := rh.resources.Delete(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}

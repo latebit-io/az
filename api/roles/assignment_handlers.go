@@ -17,13 +17,13 @@ type AssignmentHandler struct {
 type AssignmentRequest struct {
 	TenantID string `json:"tenantId"`
 	Subject  string `json:"subject"`
-	Role     string `json:"role"`
+	RoleID   string `json:"roleId"`
 }
 
 type ListAssignmentsRequest struct {
 	TenantID string `json:"tenantId"`
 	Subject  string `json:"subject"`
-	Role     string `json:"role"`
+	RoleID   string `json:"roleId"`
 }
 
 type SubjectRolesRequest struct {
@@ -49,7 +49,7 @@ func (ah AssignmentHandler) Assign(c *echo.Context) error {
 	}
 
 	err := ah.assignments.Assign(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
-		request.Subject, request.Role)
+		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
 	}
@@ -66,7 +66,7 @@ func (ah AssignmentHandler) List(c *echo.Context) error {
 	}
 
 	assignments, err := ah.assignments.List(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
-		request.Subject, request.Role)
+		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
 	}
@@ -83,7 +83,7 @@ func (ah AssignmentHandler) Unassign(c *echo.Context) error {
 	}
 
 	err := ah.assignments.Unassign(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
-		request.Subject, request.Role)
+		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
 	}

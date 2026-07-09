@@ -59,27 +59,35 @@ func newTenant() string {
 func TestFullAuthorizationFlow(t *testing.T) {
 	tenant := newTenant()
 
-	// resource type
+	// resource type; create returns the type with its generated id
+	var document struct {
+		ID string `json:"id"`
+	}
 	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenant, "key": "document",
+		"tenantId": tenant, "name": "document",
 		"actions": []string{"read", "write", "delete"},
-	}, nil)
+	}, &document)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
+	require.NotEmpty(t, document.ID)
 
-	// role + assignment
+	// role + assignment; create returns the role with its generated id
+	var editor struct {
+		ID string `json:"id"`
+	}
 	status, err = az.post("/api/roles", map[string]any{
-		"tenantId": tenant, "key": "editor", "name": "Editor",
+		"tenantId": tenant, "name": "editor",
 		"permissions": []map[string]string{
 			{"resource": "document", "action": "read"},
 			{"resource": "document", "action": "write"},
 		},
-	}, nil)
+	}, &editor)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
+	require.NotEmpty(t, editor.ID)
 
 	status, err = az.post("/api/assignments", map[string]any{
-		"tenantId": tenant, "subject": "alice@example.com", "role": "editor",
+		"tenantId": tenant, "subject": "alice@example.com", "roleId": editor.ID,
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
@@ -131,17 +139,17 @@ func TestFullAuthorizationFlow(t *testing.T) {
 
 	// referenced resource type cannot be deleted
 	status, err = az.put("/api/resources/delete", map[string]any{
-		"tenantId": tenant, "key": "document",
+		"tenantId": tenant, "id": document.ID,
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, status)
 
-	// unwind: role (assignments cascade) -> resource type
-	status, err = az.put("/api/roles/delete", map[string]any{"tenantId": tenant, "key": "editor"}, nil)
+	// unwind: role (grants + assignments cascade) -> resource type
+	status, err = az.put("/api/roles/delete", map[string]any{"tenantId": tenant, "id": editor.ID}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, status)
 
-	status, err = az.put("/api/resources/delete", map[string]any{"tenantId": tenant, "key": "document"}, nil)
+	status, err = az.put("/api/resources/delete", map[string]any{"tenantId": tenant, "id": document.ID}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, status)
 }
@@ -151,20 +159,23 @@ func TestTenantIsolation(t *testing.T) {
 	tenantB := newTenant()
 
 	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenantA, "key": "widget", "actions": []string{"use"},
+		"tenantId": tenantA, "name": "widget", "actions": []string{"use"},
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
 
+	var user struct {
+		ID string `json:"id"`
+	}
 	status, err = az.post("/api/roles", map[string]any{
-		"tenantId": tenantA, "key": "user", "name": "User",
+		"tenantId": tenantA, "name": "User",
 		"permissions": []map[string]string{{"resource": "widget", "action": "use"}},
-	}, nil)
+	}, &user)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
 
 	status, err = az.post("/api/assignments", map[string]any{
-		"tenantId": tenantA, "subject": "alice", "role": "user",
+		"tenantId": tenantA, "subject": "alice", "roleId": user.ID,
 	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, status)
@@ -197,7 +208,7 @@ func TestProblemDetailsShape(t *testing.T) {
 		Status int    `json:"status"`
 		Detail string `json:"detail"`
 	}
-	request := map[string]any{"tenantId": tenant, "key": "missing"}
+	request := map[string]any{"tenantId": tenant, "id": "00000000-0000-0000-0000-000000000000"}
 	response, err := az.rawPost("/api/resources/get", request)
 	require.NoError(t, err)
 	defer response.Body.Close()

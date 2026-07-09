@@ -13,8 +13,8 @@ const pgForeignKeyViolation = "23503"
 
 type AssignmentRepository interface {
 	Create(ctx context.Context, assignment RoleAssignment) error
-	ReadAll(ctx context.Context, tenantID, subject, role string) ([]RoleAssignment, error)
-	Delete(ctx context.Context, tenantID, subject, role string) error
+	ReadAll(ctx context.Context, tenantID, subject, roleID string) ([]RoleAssignment, error)
+	Delete(ctx context.Context, tenantID, subject, roleID string) error
 	RolesForSubject(ctx context.Context, tenantID, subject string) ([]string, error)
 }
 
@@ -28,26 +28,27 @@ func NewPostgresAssignmentRepository(pool *pgxpool.Pool) AssignmentRepository {
 
 func (r *PostgresAssignmentRepository) Create(ctx context.Context, assignment RoleAssignment) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	_, err := querier.Exec(ctx, "INSERT INTO role_assignments (tenant_id, subject, role) VALUES ($1, $2, $3)",
-		assignment.TenantID, assignment.Subject, assignment.Role)
+	_, err := querier.Exec(ctx, "INSERT INTO role_assignments (tenant_id, subject, role_id) VALUES ($1, $2, $3)",
+		assignment.TenantID, assignment.Subject, assignment.RoleID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case pgUniqueViolation:
-			return AssignmentDuplicateError{Subject: assignment.Subject, Role: assignment.Role}
+			return AssignmentDuplicateError{Subject: assignment.Subject, RoleID: assignment.RoleID}
 		case pgForeignKeyViolation:
-			return RoleNotFoundError{Value: assignment.Role}
+			return RoleNotFoundError{Value: assignment.RoleID}
 		}
 	}
 	return err
 }
 
-func (r *PostgresAssignmentRepository) ReadAll(ctx context.Context, tenantID, subject, role string) ([]RoleAssignment, error) {
+func (r *PostgresAssignmentRepository) ReadAll(ctx context.Context, tenantID, subject,
+	roleID string) ([]RoleAssignment, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	rows, err := querier.Query(ctx,
-		`SELECT id, tenant_id, subject, role, created FROM role_assignments
-		 WHERE tenant_id = $1 AND ($2 = '' OR subject = $2) AND ($3 = '' OR role = $3)
-		 ORDER BY subject, role`, tenantID, subject, role)
+		`SELECT tenant_id, subject, role_id, created FROM role_assignments
+		 WHERE tenant_id = $1 AND ($2 = '' OR subject = $2) AND ($3 = '' OR role_id::text = $3)
+		 ORDER BY subject`, tenantID, subject, roleID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func (r *PostgresAssignmentRepository) ReadAll(ctx context.Context, tenantID, su
 	var assignments []RoleAssignment
 	for rows.Next() {
 		var assignment RoleAssignment
-		if err := rows.Scan(&assignment.ID, &assignment.TenantID, &assignment.Subject, &assignment.Role,
+		if err := rows.Scan(&assignment.TenantID, &assignment.Subject, &assignment.RoleID,
 			&assignment.Created); err != nil {
 			return assignments, err
 		}
@@ -65,15 +66,16 @@ func (r *PostgresAssignmentRepository) ReadAll(ctx context.Context, tenantID, su
 	return assignments, rows.Err()
 }
 
-func (r *PostgresAssignmentRepository) Delete(ctx context.Context, tenantID, subject, role string) error {
+func (r *PostgresAssignmentRepository) Delete(ctx context.Context, tenantID, subject, roleID string) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	tag, err := querier.Exec(ctx,
-		"DELETE FROM role_assignments WHERE tenant_id = $1 AND subject = $2 AND role = $3", tenantID, subject, role)
+		"DELETE FROM role_assignments WHERE tenant_id = $1 AND subject = $2 AND role_id = $3",
+		tenantID, subject, roleID)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return AssignmentNotFoundError{Subject: subject, Role: role}
+		return AssignmentNotFoundError{Subject: subject, RoleID: roleID}
 	}
 	return nil
 }
@@ -81,19 +83,20 @@ func (r *PostgresAssignmentRepository) Delete(ctx context.Context, tenantID, sub
 func (r *PostgresAssignmentRepository) RolesForSubject(ctx context.Context, tenantID, subject string) ([]string, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	rows, err := querier.Query(ctx,
-		"SELECT role FROM role_assignments WHERE tenant_id = $1 AND subject = $2 ORDER BY role", tenantID, subject)
+		`SELECT r.name FROM role_assignments a JOIN roles r ON r.id = a.role_id
+		 WHERE a.tenant_id = $1 AND a.subject = $2 ORDER BY r.name`, tenantID, subject)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var roleKeys []string
+	var roleNames []string
 	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
-			return roleKeys, err
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return roleNames, err
 		}
-		roleKeys = append(roleKeys, role)
+		roleNames = append(roleNames, name)
 	}
-	return roleKeys, rows.Err()
+	return roleNames, rows.Err()
 }

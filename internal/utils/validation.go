@@ -4,6 +4,8 @@ import (
 	"crypto/subtle"
 	"errors"
 	"regexp"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -27,6 +29,14 @@ func ValidateEmail(email string) error {
 	}
 	if !emailRegex.MatchString(email) {
 		return errors.New("invalid email format")
+	}
+	return nil
+}
+
+// ValidateUUID validates a uuid identifier.
+func ValidateUUID(id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return errors.New("invalid uuid")
 	}
 	return nil
 }

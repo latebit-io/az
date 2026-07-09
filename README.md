@@ -3,8 +3,8 @@
 Micro authorization service — pure RBAC, kept deliberately minimal. The sibling of [BulwarkAuth](https://github.com/latebit-io/bulwarkauth): BulwarkAuth answers *who are you*, az answers *what can you do*.
 
 - **Resource types** declare what exists and the actions on it (`document`: `read`, `write`)
-- **Roles** grant `resource:action` permissions
-- **Assignments** bind subjects (opaque keys, e.g. account emails) to roles per tenant
+- **Roles** (uuid id + unique name) grant `resource:action` permissions
+- **Assignments** bind subjects (opaque keys, e.g. account emails) to roles by id, per tenant
 - **Check API**: a policy decision point — `POST /api/check` with subject, action and resource returns `{allow, reason}`
 - **Multi-tenant** everywhere, with a `default` tenant out of the box
 
@@ -22,15 +22,16 @@ Define a policy and check it:
 ```bash
 # a resource type with actions
 curl -X POST localhost:8080/api/resources -H 'Content-Type: application/json' \
-  -d '{"key":"document","actions":["read","write"]}'
+  -d '{"name":"document","actions":["read","write"]}'
 
-# a role granting permissions
+# a role granting permissions (response includes the generated id)
 curl -X POST localhost:8080/api/roles -H 'Content-Type: application/json' \
-  -d '{"key":"editor","name":"Editor","permissions":[{"resource":"document","action":"write"}]}'
+  -d '{"name":"editor","permissions":[{"resource":"document","action":"write"}]}'
+# {"id":"6a8f...","tenantId":"default","name":"editor",...}
 
-# assign it
+# assign it by id
 curl -X POST localhost:8080/api/assignments -H 'Content-Type: application/json' \
-  -d '{"subject":"alice@example.com","role":"editor"}'
+  -d '{"subject":"alice@example.com","roleId":"6a8f..."}'
 
 # check
 curl -X POST localhost:8080/api/check -H 'Content-Type: application/json' \
@@ -60,7 +61,7 @@ All endpoints take JSON bodies; errors are RFC 7807 problem details.
 
 Referential integrity is foreign keys: a grant referencing an undeclared `resource:action` is rejected (`400`), deleting a role cascades its grants and assignments, and deleting a resource type (or removing a still-granted action) returns `409` while a role references it.
 
-`POST /api/subjects/roles` returns `{"roles": [...]}` for a subject — the payload BulwarkAuth embeds as the JWT `roles` claim at token issuance.
+Resource types and roles are addressed by uuid `id` (returned on create); `name` is the unique per-tenant label. Permission grants and check requests reference resource types by name, so renaming a type never breaks existing grants. `POST /api/subjects/roles` returns `{"roles": [names...]}` for a subject — the payload BulwarkAuth embeds as the JWT `roles` claim at token issuance.
 
 ## Configuration
 

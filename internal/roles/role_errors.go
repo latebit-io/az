@@ -38,20 +38,20 @@ func (e InvalidPermissionError) Error() string {
 
 type AssignmentDuplicateError struct {
 	Subject string `json:"subject"`
-	Role    string `json:"role"`
+	RoleID  string `json:"roleId"`
 }
 
 func (e AssignmentDuplicateError) Error() string {
-	return fmt.Sprintf("assignment of role '%s' to subject '%s' already exists", e.Role, e.Subject)
+	return fmt.Sprintf("assignment of role '%s' to subject '%s' already exists", e.RoleID, e.Subject)
 }
 
 type AssignmentNotFoundError struct {
 	Subject string `json:"subject"`
-	Role    string `json:"role"`
+	RoleID  string `json:"roleId"`
 }
 
 func (e AssignmentNotFoundError) Error() string {
-	return fmt.Sprintf("assignment of role '%s' to subject '%s' not found", e.Role, e.Subject)
+	return fmt.Sprintf("assignment of role '%s' to subject '%s' not found", e.RoleID, e.Subject)
 }
 
 type InvalidAssignmentError struct {
