@@ -54,7 +54,7 @@ func (r *PostgresAssignmentRepository) ReadAll(ctx context.Context, tenantID, su
 	}
 	defer rows.Close()
 
-	var assignments []RoleAssignment
+	assignments := []RoleAssignment{}
 	for rows.Next() {
 		var assignment RoleAssignment
 		if err := rows.Scan(&assignment.TenantID, &assignment.Subject, &assignment.RoleID,
@@ -83,14 +83,15 @@ func (r *PostgresAssignmentRepository) Delete(ctx context.Context, tenantID, sub
 func (r *PostgresAssignmentRepository) RolesForSubject(ctx context.Context, tenantID, subject string) ([]string, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	rows, err := querier.Query(ctx,
-		`SELECT r.name FROM role_assignments a JOIN roles r ON r.id = a.role_id
+		`SELECT r.name FROM role_assignments a
+		 JOIN roles r ON r.id = a.role_id AND r.tenant_id = a.tenant_id
 		 WHERE a.tenant_id = $1 AND a.subject = $2 ORDER BY r.name`, tenantID, subject)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var roleNames []string
+	roleNames := []string{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {

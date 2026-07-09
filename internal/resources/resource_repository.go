@@ -110,7 +110,7 @@ func (r *PostgresResourceTypeRepository) ReadAll(ctx context.Context, tenantID s
 	}
 	defer rows.Close()
 
-	var resourceTypes []ResourceType
+	resourceTypes := []ResourceType{}
 	for rows.Next() {
 		resourceType, err := scanResourceType(rows)
 		if err != nil {

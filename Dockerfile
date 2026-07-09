@@ -18,11 +18,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -v -ldflags="-s -w" -o main .
 # Final stage
 FROM alpine:3.22
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && adduser -D -u 65532 az
 
 WORKDIR /app
 
 COPY --from=builder /app/cmd/az/main .
+
+USER az
 
 # Default port and run mode
 ENV PORT=8080

@@ -9,9 +9,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write # For creating releases
-  packages: write # For pushing to GitHub Container Registry
-  issues: write # For creating and updating issues
+  contents: read
 
 jobs:
   # First job to run unit tests
@@ -21,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -39,6 +39,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -108,6 +110,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Semantic versioning
         id: semantic-version
@@ -143,6 +146,8 @@ jobs:
     needs: semver
     if: needs.semver.outputs.should_release == 'true' && github.ref_type != 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # For creating the release tag
     outputs:
       tag_name: ${{ steps.tag-info.outputs.tag_name }}
     steps:
@@ -150,6 +155,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Create GitHub tag
         id: create-tag
@@ -182,11 +188,15 @@ jobs:
     needs: [semver, create-tag]
     if: needs.semver.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # For creating releases
+      packages: write # For pushing to GitHub Container Registry
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5

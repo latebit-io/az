@@ -14,12 +14,30 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// migrationLockKey serializes concurrent migrators (multiple replicas
+// starting at once) via a Postgres advisory lock.
+const migrationLockKey = 0x617a01 // "az" migrations
+
 // Migrate applies all pending SQL migrations from the embedded migrations
 // directory. Files are named <version>_<name>.sql and applied in version
 // order, each inside its own transaction. Applied versions are tracked in
-// the schema_migrations table.
+// the schema_migrations table. The whole run holds an advisory lock so
+// concurrent replicas cannot race through the check-then-apply window.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockKey)
+	}()
+
+	_, err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version int PRIMARY KEY,
 		name text NOT NULL,
 		applied timestamptz NOT NULL DEFAULT now()
@@ -41,14 +59,20 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	sort.Strings(names)
 
+	versions := make(map[int]string, len(names))
 	for _, name := range names {
 		version, err := migrationVersion(name)
 		if err != nil {
 			return err
 		}
+		if existing, ok := versions[version]; ok {
+			return fmt.Errorf("duplicate migration version %d: %s and %s", version, existing, name)
+		}
+		versions[version] = name
 
 		var applied bool
-		err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", version).Scan(&applied)
+		err = conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)",
+			version).Scan(&applied)
 		if err != nil {
 			return fmt.Errorf("check migration %s: %w", name, err)
 		}
@@ -61,7 +85,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", name, err)
 		}

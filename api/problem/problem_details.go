@@ -23,12 +23,14 @@ type Details struct {
 	Instance string `json:"instance,omitempty"`
 }
 
+// NewServerError deliberately omits the underlying error text — internal
+// errors (SQL, driver state) must not leak to API clients.
 func NewServerError(err error) Details {
 	return Details{
 		Type:   errorType,
 		Title:  InternalError,
 		Status: http.StatusInternalServerError,
-		Detail: err.Error(),
+		Detail: "an unexpected error occurred",
 	}
 }
 

@@ -70,6 +70,7 @@ func (r *PostgresRoleRepository) Read(ctx context.Context, tenantID, id string) 
 	if err != nil {
 		return nil, err
 	}
+	role.Permissions = []Permission{}
 
 	rows, err := querier.Query(ctx,
 		`SELECT rt.name, p.action FROM role_permissions p
@@ -98,13 +99,14 @@ func (r *PostgresRoleRepository) ReadAll(ctx context.Context, tenantID string) (
 	}
 	defer rows.Close()
 
-	var roleList []Role
+	roleList := []Role{}
 	indexByID := map[string]int{}
 	for rows.Next() {
 		var role Role
 		if err := rows.Scan(&role.ID, &role.TenantID, &role.Name, &role.Created, &role.Modified); err != nil {
 			return roleList, err
 		}
+		role.Permissions = []Permission{}
 		indexByID[role.ID] = len(roleList)
 		roleList = append(roleList, role)
 	}
@@ -176,7 +178,7 @@ func (r *PostgresRoleRepository) SubjectGrant(ctx context.Context, tenantID, sub
 	err := querier.QueryRow(ctx,
 		`SELECT r.name FROM role_assignments a
 		 JOIN role_permissions p ON p.role_id = a.role_id
-		 JOIN roles r ON r.id = a.role_id
+		 JOIN roles r ON r.id = a.role_id AND r.tenant_id = a.tenant_id
 		 WHERE a.tenant_id = $1 AND a.subject = $2 AND p.resource_type_id = $3 AND p.action = $4
 		 LIMIT 1`, tenantID, subject, resourceTypeID, action).Scan(&roleName)
 	if errors.Is(err, pgx.ErrNoRows) {

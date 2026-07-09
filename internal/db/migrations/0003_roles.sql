@@ -4,7 +4,8 @@ CREATE TABLE roles (
     name text NOT NULL,
     created timestamptz NOT NULL DEFAULT now(),
     modified timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, name)
+    UNIQUE (tenant_id, name),
+    UNIQUE (tenant_id, id)
 );
 
 CREATE TABLE role_permissions (

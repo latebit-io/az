@@ -1,12 +1,14 @@
 # Build stage
 FROM alpine:3.22
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && adduser -D -u 65532 az
 
 WORKDIR /app/
 
 # The binary is copied by GoReleaser
 COPY az /app/
+
+USER az
 
 ENV PORT=8080
 EXPOSE $PORT

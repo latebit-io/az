@@ -97,6 +97,20 @@ func TestAssignmentService_Unassign(t *testing.T) {
 	assert.ErrorAs(t, err, &notFound)
 }
 
+func TestAssignmentService_CrossTenantRoleRejected(t *testing.T) {
+	service, _, viewer, _, ctx := newAssignmentFixture(t)
+
+	// viewer belongs to "default"; assigning it in another tenant must fail
+	// even though the role id is real (composite FK on tenant_id + role_id)
+	err := service.Assign(ctx, "other", "mallory", viewer.ID)
+	var notFound RoleNotFoundError
+	assert.ErrorAs(t, err, &notFound)
+
+	roleNames, err := service.RolesForSubject(ctx, "other", "mallory")
+	require.NoError(t, err)
+	assert.Empty(t, roleNames)
+}
+
 func TestAssignmentService_CascadeOnRoleDelete(t *testing.T) {
 	service, roleService, viewer, _, ctx := newAssignmentFixture(t)
 

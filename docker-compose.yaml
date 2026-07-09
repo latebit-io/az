@@ -17,9 +17,14 @@ services:
   az:
     build:
       dockerfile: Dockerfile
-    network_mode: "host"
+    ports:
+      - 8080:8080
     env_file:
       - .env
+    environment:
+      # inside the compose network postgres is reachable by service name,
+      # overriding the localhost default in .env
+      DB_CONNECTION: postgres://az:az@postgres:5432/az?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy

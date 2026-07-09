@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	testPostgres *embeddedpostgres.EmbeddedPostgres
-	testPort     uint32
+	testPostgres    *embeddedpostgres.EmbeddedPostgres
+	testPort        uint32
+	testRuntimePath string
 )
 
 // StartTestPostgres boots one embedded PostgreSQL server for a test package.
@@ -34,6 +35,7 @@ func StartTestPostgres() error {
 	if err != nil {
 		return err
 	}
+	testRuntimePath = runtimePath
 
 	testPostgres = embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.V17).
@@ -45,12 +47,17 @@ func StartTestPostgres() error {
 	return testPostgres.Start()
 }
 
-// StopTestPostgres stops the package-level embedded server.
+// StopTestPostgres stops the package-level embedded server and removes its
+// temp runtime directory.
 func StopTestPostgres() error {
 	if testPostgres == nil {
 		return nil
 	}
-	return testPostgres.Stop()
+	err := testPostgres.Stop()
+	if testRuntimePath != "" {
+		_ = os.RemoveAll(testRuntimePath)
+	}
+	return err
 }
 
 // RunTestMain wraps m.Run with embedded PostgreSQL start/stop. Use from a
