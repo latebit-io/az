@@ -12,8 +12,8 @@ import (
 
 func newAssignmentFixture(t *testing.T) (AssignmentService, RoleService, context.Context) {
 	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool))
-	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), resourceService)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
+	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), utils.NewPostgresTxManager(pool))
 	assignmentService := NewDefaultAssignmentService(NewPostgresAssignmentRepository(pool))
 	ctx := context.Background()
 	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read"}))

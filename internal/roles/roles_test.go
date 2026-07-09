@@ -17,8 +17,8 @@ func TestMain(m *testing.M) {
 
 func newRoleFixture(t *testing.T) (RoleService, resources.ResourceService, context.Context) {
 	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool))
-	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), resourceService)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
+	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write", "delete"}))
 	return roleService, resourceService, ctx
@@ -45,12 +45,17 @@ func TestRoleService_GrantValidation(t *testing.T) {
 		[]Permission{{Resource: "missing", Action: "read"}})
 	var invalidPermission InvalidPermissionError
 	require.ErrorAs(t, err, &invalidPermission)
-	assert.Equal(t, "unknown resource type", invalidPermission.Reason)
+	assert.Equal(t, "missing", invalidPermission.Resource)
 
 	err = service.Create(ctx, "default", "editor", "Editor", "",
 		[]Permission{{Resource: "document", Action: "share"}})
 	require.ErrorAs(t, err, &invalidPermission)
-	assert.Equal(t, "unknown action", invalidPermission.Reason)
+	assert.Equal(t, "share", invalidPermission.Action)
+
+	// a failed create must not leave a partial role behind
+	_, err = service.Get(ctx, "default", "editor")
+	var notFound RoleNotFoundError
+	assert.ErrorAs(t, err, &notFound)
 
 	err = service.Create(ctx, "default", "Bad Key", "Editor", "", nil)
 	var invalidRole InvalidRoleError
@@ -98,8 +103,8 @@ func TestResourceTypeDeleteBlockedByRoleReference(t *testing.T) {
 	pool := utils.NewTestPool(t)
 	roleRepo := NewPostgresRoleRepository(pool)
 	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
-		roleRepo)
-	roleService := NewDefaultRoleService(roleRepo, resourceService)
+		utils.NewPostgresTxManager(pool))
+	roleService := NewDefaultRoleService(roleRepo, utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read"}))
@@ -114,11 +119,31 @@ func TestResourceTypeDeleteBlockedByRoleReference(t *testing.T) {
 	assert.NoError(t, resourceService.Delete(ctx, "default", "document"))
 }
 
+func TestResourceTypeActionRemovalBlockedByRoleReference(t *testing.T) {
+	pool := utils.NewTestPool(t)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
+		utils.NewPostgresTxManager(pool))
+	roleService := NewDefaultRoleService(NewPostgresRoleRepository(pool), utils.NewPostgresTxManager(pool))
+	ctx := context.Background()
+
+	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))
+	require.NoError(t, roleService.Create(ctx, "default", "editor", "Editor", "",
+		[]Permission{{Resource: "document", Action: "write"}}))
+
+	// removing the granted action is refused
+	err := resourceService.Update(ctx, "default", "document", []string{"read"})
+	var referenced resources.ResourceTypeReferencedError
+	assert.ErrorAs(t, err, &referenced)
+
+	// removing an ungranted action is fine
+	assert.NoError(t, resourceService.Update(ctx, "default", "document", []string{"write"}))
+}
+
 func TestRoleRepository_AnyGrants(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool))
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	repo := NewPostgresRoleRepository(pool)
-	service := NewDefaultRoleService(repo, resourceService)
+	service := NewDefaultRoleService(repo, utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, resourceService.Create(ctx, "default", "document", []string{"read", "write"}))

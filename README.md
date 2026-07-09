@@ -8,7 +8,7 @@ Micro authorization service — pure RBAC, kept deliberately minimal. The siblin
 - **Check API**: a policy decision point — `POST /api/check` with subject, action and resource returns `{allow, reason}`
 - **Multi-tenant** everywhere, with a `default` tenant out of the box
 
-Stack: Go, Echo v5, PostgreSQL (pgx), slog. No ORM, no policy language — policies are data. Four tables.
+Stack: Go, Echo v5, PostgreSQL (pgx), slog. No ORM, no policy language — policies are rows: `tenants`, `resource_types`, `resource_type_actions`, `roles`, `role_permissions`, `role_assignments`. Integrity is foreign keys, not application code.
 
 ## Quick start
 
@@ -58,7 +58,7 @@ All endpoints take JSON bodies; errors are RFC 7807 problem details.
 | Check | `POST /api/check` · `POST /api/check/bulk` |
 | Health | `GET /health` |
 
-Referential integrity is enforced: grants are validated against resource types at write time, deleting a role cascades its assignments, and deleting a resource type still referenced by a role returns `409`.
+Referential integrity is foreign keys: a grant referencing an undeclared `resource:action` is rejected (`400`), deleting a role cascades its grants and assignments, and deleting a resource type (or removing a still-granted action) returns `409` while a role references it.
 
 `POST /api/subjects/roles` returns `{"roles": [...]}` for a subject — the payload BulwarkAuth embeds as the JWT `roles` claim at token issuance.
 

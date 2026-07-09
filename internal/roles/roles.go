@@ -2,11 +2,9 @@ package roles
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/latebit-io/az/internal/resources"
 	"github.com/latebit-io/az/internal/utils"
 )
 
@@ -39,24 +37,29 @@ type RoleService interface {
 
 type DefaultRoleService struct {
 	repo      RoleRepository
-	resources resources.ResourceService
+	txManager utils.TxManager
 }
 
-func NewDefaultRoleService(repo RoleRepository, resourceService resources.ResourceService) RoleService {
-	return &DefaultRoleService{repo: repo, resources: resourceService}
+func NewDefaultRoleService(repo RoleRepository, txManager utils.TxManager) RoleService {
+	return &DefaultRoleService{repo: repo, txManager: txManager}
 }
 
+// Create stores the role and its permission grants in one transaction. A
+// grant referencing an undeclared resource:action fails the foreign key and
+// surfaces as InvalidPermissionError.
 func (s *DefaultRoleService) Create(ctx context.Context, tenantID, key, name, description string,
 	permissions []Permission) error {
-	if err := s.validateRole(ctx, tenantID, key, name, permissions); err != nil {
+	if err := validateRole(key, name); err != nil {
 		return err
 	}
-	return s.repo.Create(ctx, Role{
-		TenantID:    tenantID,
-		Key:         key,
-		Name:        name,
-		Description: description,
-		Permissions: permissions,
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.repo.Create(txCtx, Role{
+			TenantID:    tenantID,
+			Key:         key,
+			Name:        name,
+			Description: description,
+			Permissions: permissions,
+		})
 	})
 }
 
@@ -68,55 +71,35 @@ func (s *DefaultRoleService) List(ctx context.Context, tenantID string) ([]Role,
 	return s.repo.ReadAll(ctx, tenantID)
 }
 
+// Update replaces the role's name, description and permission grants in one
+// transaction; grants are validated by foreign key.
 func (s *DefaultRoleService) Update(ctx context.Context, tenantID, key, name, description string,
 	permissions []Permission) error {
-	if err := s.validateRole(ctx, tenantID, key, name, permissions); err != nil {
+	if err := validateRole(key, name); err != nil {
 		return err
 	}
-	return s.repo.Update(ctx, Role{
-		TenantID:    tenantID,
-		Key:         key,
-		Name:        name,
-		Description: description,
-		Permissions: permissions,
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.repo.Update(txCtx, Role{
+			TenantID:    tenantID,
+			Key:         key,
+			Name:        name,
+			Description: description,
+			Permissions: permissions,
+		})
 	})
 }
 
+// Delete removes the role; its permission grants and assignments cascade.
 func (s *DefaultRoleService) Delete(ctx context.Context, tenantID, key string) error {
 	return s.repo.Delete(ctx, tenantID, key)
 }
 
-// validateRole checks the role shape and every permission grant against the
-// tenant's resource type definitions.
-func (s *DefaultRoleService) validateRole(ctx context.Context, tenantID, key, name string,
-	permissions []Permission) error {
+func validateRole(key, name string) error {
 	if err := utils.ValidateKey(key); err != nil {
 		return InvalidRoleError{Value: fmt.Sprintf("key '%s': %s", key, err)}
 	}
 	if name == "" {
 		return InvalidRoleError{Value: "name is required"}
-	}
-
-	resourceTypes := map[string]*resources.ResourceType{}
-	for _, permission := range permissions {
-		resourceType, ok := resourceTypes[permission.Resource]
-		if !ok {
-			var err error
-			resourceType, err = s.resources.Get(ctx, tenantID, permission.Resource)
-			var notFound resources.ResourceTypeNotFoundError
-			if errors.As(err, &notFound) {
-				return InvalidPermissionError{Resource: permission.Resource, Action: permission.Action,
-					Reason: "unknown resource type"}
-			}
-			if err != nil {
-				return err
-			}
-			resourceTypes[permission.Resource] = resourceType
-		}
-		if !resourceType.HasAction(permission.Action) {
-			return InvalidPermissionError{Resource: permission.Resource, Action: permission.Action,
-				Reason: "unknown action"}
-		}
 	}
 	return nil
 }

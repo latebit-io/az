@@ -77,12 +77,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	txManager := utils.NewPostgresTxManager(pool)
 	resourceRepository := resources.NewPostgresResourceTypeRepository(pool)
-	roleRepository := roles.NewPostgresRoleRepository(pool)
-	resourceService := resources.NewDefaultResourceService(resourceRepository, roleRepository)
+	resourceService := resources.NewDefaultResourceService(resourceRepository, txManager)
 	resourceHandler := resourcesapi.NewResourceHandler(resourceService)
 	resourcesapi.ResourceRoutes(service, resourceHandler, ratelimiter)
-	roleService := roles.NewDefaultRoleService(roleRepository, resourceService)
+	roleRepository := roles.NewPostgresRoleRepository(pool)
+	roleService := roles.NewDefaultRoleService(roleRepository, txManager)
 	roleHandler := rolesapi.NewRoleHandler(roleService)
 	rolesapi.RoleRoutes(service, roleHandler, ratelimiter)
 	assignmentRepository := roles.NewPostgresAssignmentRepository(pool)

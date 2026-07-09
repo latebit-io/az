@@ -18,8 +18,8 @@ Three layers, manual dependency injection wired in `cmd/az/main.go`:
 
 Domains:
 - `internal/tenants` — tenant registry, `"default"` tenant auto-created at startup
-- `internal/resources` — resource types (key + actions)
-- `internal/roles` — roles (permission grants `resource:action`) and role assignments (subject → role); subject keys are opaque (BulwarkAuth accounts map via email)
+- `internal/resources` — resource types + their actions (`resource_type_actions` table); a permission is a declared `resource:action` pair
+- `internal/roles` — roles, permission grants (`role_permissions` table, FK onto `resource_type_actions`) and role assignments (subject → role); subject keys are opaque (BulwarkAuth accounts map via email)
 - `internal/check` — the decision engine (PDP)
 - `internal/db` — pgx pool + embedded SQL migrations (run at startup)
 - `internal/utils` — QuerierFrom/TxManager, key validation, embedded-postgres test util
@@ -27,15 +27,15 @@ Domains:
 Patterns:
 - Repositories resolve their querier with `utils.QuerierFrom(ctx, pool)` so the same methods work inside and outside `TxManager.WithTransaction`.
 - Typed domain errors (`*NotFoundError`, `*DuplicateError`, `*ReferencedError`, ...) mapped in handlers via `errors.As` to problem details. Duplicates via unique constraints (pg error 23505), cascades and blocks via FKs (23503).
+- Integrity is DB-enforced, not service code: role grants FK onto `resource_type_actions` (invalid grant = FK violation → InvalidPermissionError), role delete cascades grants and assignments, deleting a resource type or removing a still-granted action is refused by FK RESTRICT (→ 409).
 - Multi-tenant everywhere: `tenantID` is the first argument of service/repository methods; empty tenantId in requests means `"default"`.
-- Cross-package integrity without import cycles: small interfaces defined at the consumer (`resources.ReferenceChecker`), implemented by repositories elsewhere, wired in main.
 
 ## Decision Engine
 
 `POST /api/check` with `{tenantId, subject, action, resource}` → `{allow, reason}`:
 
 1. Resolve resource type; unknown type/action → deny (200 with allow:false, never an error).
-2. Subject's role assignments joined against role permission grants (jsonb containment, GIN indexed) — match → allow.
+2. Subject's role assignments joined against `role_permissions` — match → allow.
 3. Otherwise deny.
 
 ## Coding Standards

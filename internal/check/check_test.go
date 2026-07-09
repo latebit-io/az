@@ -30,9 +30,9 @@ func newCheckFixture(t *testing.T) (CheckService, context.Context) {
 	ctx := context.Background()
 
 	resourceRepo := resources.NewPostgresResourceTypeRepository(pool)
-	resourceService := resources.NewDefaultResourceService(resourceRepo)
+	resourceService := resources.NewDefaultResourceService(resourceRepo, utils.NewPostgresTxManager(pool))
 	roleRepo := roles.NewPostgresRoleRepository(pool)
-	roleService := roles.NewDefaultRoleService(roleRepo, resourceService)
+	roleService := roles.NewDefaultRoleService(roleRepo, utils.NewPostgresTxManager(pool))
 	assignmentRepo := roles.NewPostgresAssignmentRepository(pool)
 	assignmentService := roles.NewDefaultAssignmentService(assignmentRepo)
 

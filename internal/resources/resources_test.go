@@ -16,7 +16,7 @@ func TestMain(m *testing.M) {
 
 func TestResourceService_CreateAndGet(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	err := service.Create(ctx, "default", "document", []string{"read", "write", "delete"})
@@ -25,7 +25,7 @@ func TestResourceService_CreateAndGet(t *testing.T) {
 	resourceType, err := service.Get(ctx, "default", "document")
 	require.NoError(t, err)
 	assert.Equal(t, "document", resourceType.Key)
-	assert.Equal(t, []string{"read", "write", "delete"}, resourceType.Actions)
+	assert.ElementsMatch(t, []string{"read", "write", "delete"}, resourceType.Actions)
 	assert.True(t, resourceType.HasAction("read"))
 	assert.False(t, resourceType.HasAction("share"))
 	assert.NotEmpty(t, resourceType.ID)
@@ -33,7 +33,7 @@ func TestResourceService_CreateAndGet(t *testing.T) {
 
 func TestResourceService_CreateValidation(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	tests := []struct {
@@ -57,7 +57,7 @@ func TestResourceService_CreateValidation(t *testing.T) {
 
 func TestResourceService_Duplicate(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, service.Create(ctx, "default", "document", []string{"read"}))
@@ -71,7 +71,7 @@ func TestResourceService_Duplicate(t *testing.T) {
 
 func TestResourceService_List(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, service.Create(ctx, "default", "document", []string{"read"}))
@@ -87,7 +87,7 @@ func TestResourceService_List(t *testing.T) {
 
 func TestResourceService_Update(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, service.Create(ctx, "default", "document", []string{"read"}))
@@ -105,7 +105,7 @@ func TestResourceService_Update(t *testing.T) {
 
 func TestResourceService_Delete(t *testing.T) {
 	pool := utils.NewTestPool(t)
-	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool))
+	service := NewDefaultResourceService(NewPostgresResourceTypeRepository(pool), utils.NewPostgresTxManager(pool))
 	ctx := context.Background()
 
 	require.NoError(t, service.Create(ctx, "default", "document", []string{"read"}))

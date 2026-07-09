@@ -4,10 +4,19 @@ CREATE TABLE roles (
     key text NOT NULL,
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
-    permissions jsonb NOT NULL DEFAULT '[]',
     created timestamptz NOT NULL DEFAULT now(),
     modified timestamptz NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, key)
 );
 
-CREATE INDEX roles_permissions_idx ON roles USING gin (permissions jsonb_path_ops);
+CREATE TABLE role_permissions (
+    tenant_id text NOT NULL,
+    role text NOT NULL,
+    resource text NOT NULL,
+    action text NOT NULL,
+    PRIMARY KEY (tenant_id, role, resource, action),
+    FOREIGN KEY (tenant_id, role) REFERENCES roles (tenant_id, key) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, resource, action) REFERENCES resource_type_actions (tenant_id, resource, action) ON DELETE RESTRICT
+);
+
+CREATE INDEX role_permissions_grant_idx ON role_permissions (tenant_id, resource, action);

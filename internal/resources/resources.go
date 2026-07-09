@@ -9,7 +9,8 @@ import (
 )
 
 // ResourceType defines a protectable resource and the actions that exist on
-// it. Permissions are resource:action pairs derived from these definitions.
+// it. Permissions are resource:action pairs derived from these definitions;
+// role grants reference them by foreign key.
 type ResourceType struct {
 	ID       string    `json:"id"`
 	TenantID string    `json:"tenantId"`
@@ -37,30 +38,26 @@ type ResourceService interface {
 	Delete(ctx context.Context, tenantID, key string) error
 }
 
-// ReferenceChecker reports whether something still references a resource
-// type; implemented by the roles and conditions repositories and injected in
-// main so type deletion can refuse while grants or rules point at it.
-type ReferenceChecker interface {
-	AnyReferencesResource(ctx context.Context, tenantID, resource string) (bool, error)
-}
-
 type DefaultResourceService struct {
-	repo     ResourceTypeRepository
-	checkers []ReferenceChecker
+	repo      ResourceTypeRepository
+	txManager utils.TxManager
 }
 
-func NewDefaultResourceService(repo ResourceTypeRepository, checkers ...ReferenceChecker) ResourceService {
-	return &DefaultResourceService{repo: repo, checkers: checkers}
+func NewDefaultResourceService(repo ResourceTypeRepository, txManager utils.TxManager) ResourceService {
+	return &DefaultResourceService{repo: repo, txManager: txManager}
 }
 
 func (s *DefaultResourceService) Create(ctx context.Context, tenantID, key string, actions []string) error {
-	if err := validateResourceType(key, actions); err != nil {
+	actions, err := validateResourceType(key, actions)
+	if err != nil {
 		return err
 	}
-	return s.repo.Create(ctx, ResourceType{
-		TenantID: tenantID,
-		Key:      key,
-		Actions:  actions,
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.repo.Create(txCtx, ResourceType{
+			TenantID: tenantID,
+			Key:      key,
+			Actions:  actions,
+		})
 	})
 }
 
@@ -72,43 +69,46 @@ func (s *DefaultResourceService) List(ctx context.Context, tenantID string) ([]R
 	return s.repo.ReadAll(ctx, tenantID)
 }
 
+// Update replaces the declared actions. Removing an action that a role still
+// grants is refused (foreign key RESTRICT).
 func (s *DefaultResourceService) Update(ctx context.Context, tenantID, key string, actions []string) error {
-	if err := validateResourceType(key, actions); err != nil {
+	actions, err := validateResourceType(key, actions)
+	if err != nil {
 		return err
 	}
-	return s.repo.Update(ctx, ResourceType{
-		TenantID: tenantID,
-		Key:      key,
-		Actions:  actions,
+	return s.txManager.WithTransaction(ctx, func(txCtx context.Context) error {
+		return s.repo.Update(txCtx, ResourceType{
+			TenantID: tenantID,
+			Key:      key,
+			Actions:  actions,
+		})
 	})
 }
 
-// Delete removes a resource type and (via FK cascade) its instances. Refuses
-// while roles or condition set rules still reference the type.
+// Delete removes a resource type and its actions (FK cascade). Refused while
+// any role permission still references an action (FK RESTRICT).
 func (s *DefaultResourceService) Delete(ctx context.Context, tenantID, key string) error {
-	for _, checker := range s.checkers {
-		referenced, err := checker.AnyReferencesResource(ctx, tenantID, key)
-		if err != nil {
-			return err
-		}
-		if referenced {
-			return ResourceTypeReferencedError{Value: key}
-		}
-	}
 	return s.repo.Delete(ctx, tenantID, key)
 }
 
-func validateResourceType(key string, actions []string) error {
+// validateResourceType checks keys and returns the deduplicated action list.
+func validateResourceType(key string, actions []string) ([]string, error) {
 	if err := utils.ValidateKey(key); err != nil {
-		return InvalidResourceTypeError{Value: fmt.Sprintf("key '%s': %s", key, err)}
+		return nil, InvalidResourceTypeError{Value: fmt.Sprintf("key '%s': %s", key, err)}
 	}
 	if len(actions) == 0 {
-		return InvalidResourceTypeError{Value: "at least one action is required"}
+		return nil, InvalidResourceTypeError{Value: "at least one action is required"}
 	}
+	seen := make(map[string]bool, len(actions))
+	deduped := make([]string, 0, len(actions))
 	for _, action := range actions {
 		if err := utils.ValidateKey(action); err != nil {
-			return InvalidResourceTypeError{Value: fmt.Sprintf("action '%s': %s", action, err)}
+			return nil, InvalidResourceTypeError{Value: fmt.Sprintf("action '%s': %s", action, err)}
+		}
+		if !seen[action] {
+			seen[action] = true
+			deduped = append(deduped, action)
 		}
 	}
-	return nil
+	return deduped, nil
 }

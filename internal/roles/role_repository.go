@@ -2,7 +2,6 @@ package roles
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -19,12 +18,8 @@ type RoleRepository interface {
 	ReadAll(ctx context.Context, tenantID string) ([]Role, error)
 	Update(ctx context.Context, role Role) error
 	Delete(ctx context.Context, tenantID, key string) error
-	// AnyGrants reports whether any of the given roles grants resource:action,
-	// using jsonb containment against the role's permissions (GIN indexed).
+	// AnyGrants reports whether any of the given roles grants resource:action.
 	AnyGrants(ctx context.Context, tenantID string, roleKeys []string, resource, action string) (string, bool, error)
-	// AnyReferencesResource reports whether any role grants a permission on
-	// the resource type.
-	AnyReferencesResource(ctx context.Context, tenantID, resource string) (bool, error)
 }
 
 type PostgresRoleRepository struct {
@@ -37,73 +32,114 @@ func NewPostgresRoleRepository(pool *pgxpool.Pool) RoleRepository {
 
 func (r *PostgresRoleRepository) Create(ctx context.Context, role Role) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	permissions, err := marshalPermissions(role.Permissions)
-	if err != nil {
-		return err
-	}
-	_, err = querier.Exec(ctx,
-		"INSERT INTO roles (tenant_id, key, name, description, permissions) VALUES ($1, $2, $3, $4, $5)",
-		role.TenantID, role.Key, role.Name, role.Description, permissions)
+	_, err := querier.Exec(ctx,
+		"INSERT INTO roles (tenant_id, key, name, description) VALUES ($1, $2, $3, $4)",
+		role.TenantID, role.Key, role.Name, role.Description)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 		return RoleDuplicateError{Value: role.Key}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return insertPermissions(ctx, querier, role)
 }
 
 func (r *PostgresRoleRepository) Read(ctx context.Context, tenantID, key string) (*Role, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	row := querier.QueryRow(ctx,
-		`SELECT id, tenant_id, key, name, description, permissions, created, modified
-		 FROM roles WHERE tenant_id = $1 AND key = $2`, tenantID, key)
-	role, err := scanRole(row)
+	var role Role
+	err := querier.QueryRow(ctx,
+		"SELECT id, tenant_id, key, name, description, created, modified FROM roles WHERE tenant_id = $1 AND key = $2",
+		tenantID, key).Scan(&role.ID, &role.TenantID, &role.Key, &role.Name, &role.Description,
+		&role.Created, &role.Modified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, RoleNotFoundError{Value: key}
 	}
 	if err != nil {
 		return nil, err
 	}
-	return role, nil
+
+	rows, err := querier.Query(ctx,
+		`SELECT resource, action FROM role_permissions WHERE tenant_id = $1 AND role = $2
+		 ORDER BY resource, action`, tenantID, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var permission Permission
+		if err := rows.Scan(&permission.Resource, &permission.Action); err != nil {
+			return nil, err
+		}
+		role.Permissions = append(role.Permissions, permission)
+	}
+	return &role, rows.Err()
 }
 
 func (r *PostgresRoleRepository) ReadAll(ctx context.Context, tenantID string) ([]Role, error) {
 	querier := utils.QuerierFrom(ctx, r.pool)
 	rows, err := querier.Query(ctx,
-		`SELECT id, tenant_id, key, name, description, permissions, created, modified
-		 FROM roles WHERE tenant_id = $1 ORDER BY key`, tenantID)
+		"SELECT id, tenant_id, key, name, description, created, modified FROM roles WHERE tenant_id = $1 ORDER BY key",
+		tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var roleList []Role
+	indexByKey := map[string]int{}
 	for rows.Next() {
-		role, err := scanRole(rows)
-		if err != nil {
+		var role Role
+		if err := rows.Scan(&role.ID, &role.TenantID, &role.Key, &role.Name, &role.Description,
+			&role.Created, &role.Modified); err != nil {
 			return roleList, err
 		}
-		roleList = append(roleList, *role)
+		indexByKey[role.Key] = len(roleList)
+		roleList = append(roleList, role)
 	}
-	return roleList, rows.Err()
+	if err := rows.Err(); err != nil {
+		return roleList, err
+	}
+
+	permissionRows, err := querier.Query(ctx,
+		"SELECT role, resource, action FROM role_permissions WHERE tenant_id = $1 ORDER BY resource, action",
+		tenantID)
+	if err != nil {
+		return roleList, err
+	}
+	defer permissionRows.Close()
+	for permissionRows.Next() {
+		var roleKey string
+		var permission Permission
+		if err := permissionRows.Scan(&roleKey, &permission.Resource, &permission.Action); err != nil {
+			return roleList, err
+		}
+		if index, ok := indexByKey[roleKey]; ok {
+			roleList[index].Permissions = append(roleList[index].Permissions, permission)
+		}
+	}
+	return roleList, permissionRows.Err()
 }
 
+// Update replaces the role's name, description and permission grants.
 func (r *PostgresRoleRepository) Update(ctx context.Context, role Role) error {
 	querier := utils.QuerierFrom(ctx, r.pool)
-	permissions, err := marshalPermissions(role.Permissions)
-	if err != nil {
-		return err
-	}
 	tag, err := querier.Exec(ctx,
-		`UPDATE roles SET name = $3, description = $4, permissions = $5, modified = now()
-		 WHERE tenant_id = $1 AND key = $2`,
-		role.TenantID, role.Key, role.Name, role.Description, permissions)
+		"UPDATE roles SET name = $3, description = $4, modified = now() WHERE tenant_id = $1 AND key = $2",
+		role.TenantID, role.Key, role.Name, role.Description)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return RoleNotFoundError{Value: role.Key}
 	}
-	return nil
+
+	_, err = querier.Exec(ctx, "DELETE FROM role_permissions WHERE tenant_id = $1 AND role = $2",
+		role.TenantID, role.Key)
+	if err != nil {
+		return err
+	}
+	return insertPermissions(ctx, querier, role)
 }
 
 func (r *PostgresRoleRepository) Delete(ctx context.Context, tenantID, key string) error {
@@ -124,14 +160,11 @@ func (r *PostgresRoleRepository) AnyGrants(ctx context.Context, tenantID string,
 		return "", false, nil
 	}
 	querier := utils.QuerierFrom(ctx, r.pool)
-	grant, err := json.Marshal([]Permission{{Resource: resource, Action: action}})
-	if err != nil {
-		return "", false, err
-	}
 	var roleKey string
-	err = querier.QueryRow(ctx,
-		"SELECT key FROM roles WHERE tenant_id = $1 AND key = ANY($2) AND permissions @> $3 LIMIT 1",
-		tenantID, roleKeys, grant).Scan(&roleKey)
+	err := querier.QueryRow(ctx,
+		`SELECT role FROM role_permissions
+		 WHERE tenant_id = $1 AND role = ANY($2) AND resource = $3 AND action = $4 LIMIT 1`,
+		tenantID, roleKeys, resource, action).Scan(&roleKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -141,36 +174,22 @@ func (r *PostgresRoleRepository) AnyGrants(ctx context.Context, tenantID string,
 	return roleKey, true, nil
 }
 
-func (r *PostgresRoleRepository) AnyReferencesResource(ctx context.Context, tenantID, resource string) (bool, error) {
-	querier := utils.QuerierFrom(ctx, r.pool)
-	grant, err := json.Marshal([]map[string]string{{"resource": resource}})
-	if err != nil {
-		return false, err
+// insertPermissions writes the grants; a foreign key violation means the
+// resource:action pair was never declared on a resource type.
+func insertPermissions(ctx context.Context, querier utils.Querier, role Role) error {
+	for _, permission := range role.Permissions {
+		_, err := querier.Exec(ctx,
+			`INSERT INTO role_permissions (tenant_id, role, resource, action) VALUES ($1, $2, $3, $4)
+			 ON CONFLICT DO NOTHING`,
+			role.TenantID, role.Key, permission.Resource, permission.Action)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return InvalidPermissionError{Resource: permission.Resource, Action: permission.Action,
+				Reason: "not declared on any resource type"}
+		}
+		if err != nil {
+			return err
+		}
 	}
-	var referenced bool
-	err = querier.QueryRow(ctx,
-		"SELECT EXISTS(SELECT 1 FROM roles WHERE tenant_id = $1 AND permissions @> $2)",
-		tenantID, grant).Scan(&referenced)
-	return referenced, err
-}
-
-func marshalPermissions(permissions []Permission) ([]byte, error) {
-	if permissions == nil {
-		permissions = []Permission{}
-	}
-	return json.Marshal(permissions)
-}
-
-func scanRole(row pgx.Row) (*Role, error) {
-	var role Role
-	var permissions []byte
-	err := row.Scan(&role.ID, &role.TenantID, &role.Key, &role.Name, &role.Description, &permissions,
-		&role.Created, &role.Modified)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(permissions, &role.Permissions); err != nil {
-		return nil, err
-	}
-	return &role, nil
+	return nil
 }
