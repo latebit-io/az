@@ -8,7 +8,6 @@ import (
 	"github.com/latebit-io/az/api/auth"
 	"github.com/latebit-io/az/api/problem"
 	"github.com/latebit-io/az/internal/apikeys"
-	"github.com/latebit-io/az/internal/utils"
 )
 
 type ApiKeyHandler struct {
@@ -45,7 +44,7 @@ func (ah ApiKeyHandler) Create(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	created, err := ah.apiKeys.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Name)
+	created, err := ah.apiKeys.Create(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.Name)
 	if err != nil {
 		return apiKeyProblem(c, err)
 	}
@@ -65,7 +64,7 @@ func (ah ApiKeyHandler) List(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	keys, err := ah.apiKeys.List(c.Request().Context(), utils.TenantOrDefault(request.TenantID))
+	keys, err := ah.apiKeys.List(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID))
 	if err != nil {
 		return apiKeyProblem(c, err)
 	}
@@ -84,7 +83,7 @@ func (ah ApiKeyHandler) Revoke(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := ah.apiKeys.Revoke(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
+	err := ah.apiKeys.Revoke(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID)
 	if err != nil {
 		return apiKeyProblem(c, err)
 	}

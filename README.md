@@ -74,7 +74,7 @@ All endpoints take JSON bodies; errors are RFC 7807 problem details.
 | Roles | `POST /api/roles` (+`/get`, `/list`) · `PUT /api/roles` · `PUT /api/roles/delete` |
 | Assignments | `POST /api/assignments` · `POST /api/assignments/list` · `PUT /api/assignments/delete` · `POST /api/subjects/roles` |
 | Check | `POST /api/check` · `POST /api/check/bulk` |
-| Api keys | `POST /api/apikeys` · `POST /api/apikeys/list` · `PUT /api/apikeys/delete` (bootstrap key only) |
+| Api keys (all bootstrap key only) | `POST /api/apikeys` · `POST /api/apikeys/list` · `PUT /api/apikeys/delete` |
 | Health | `GET /health` (unauthenticated) |
 
 Referential integrity is foreign keys: a grant referencing an undeclared `resource:action` is rejected (`400`), deleting a role cascades its grants and assignments, and deleting a resource type (or removing a still-granted action) returns `409` while a role references it.

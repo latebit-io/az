@@ -21,7 +21,7 @@ Rules that must hold:
 - Repositories resolve their querier with `utils.QuerierFrom(ctx, pool)`; multi-statement writes go through `TxManager.WithTransaction`
 - Typed domain errors mapped in handlers via `errors.As`; constraint violations (23505/23503) mapped at the repository
 - Integrity is DB-enforced, never service-side lookups: invalid grants, referenced deletes, and cascades are all foreign keys
-- `tenantID` is the first argument of service/repository methods; empty tenantId in requests means `"default"`
+- `tenantID` is the first argument of service/repository methods that take scalar keys; write methods that persist a full entity carry it in the entity struct instead (`Create(ctx, role)`) — do not flag this as a convention violation. Empty tenantId in requests means `"default"`
 - Handlers resolve the tenant with `auth.EffectiveTenant(c, request.TenantID)` — a tenant-scoped api key overrides any body tenantId; the bootstrap key (BOOTSTRAP_API_KEY) is root and the only key that manages api keys
 - Ids are app-generated UUIDv7 (`uuid.NewV7()` in repository Create), never `gen_random_uuid()`
 - Always use range for loops when possible
