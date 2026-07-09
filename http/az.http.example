@@ -1,0 +1,176 @@
+### Copy this file to az.http and adjust values. Requires a running az service.
+
+@host = http://localhost:8080
+# When BOOTSTRAP_API_KEY is set, add to each request (except /health):
+# X-AZ-API-KEY: {{key}}
+@key = your-bootstrap-or-tenant-key
+
+### Health (never requires a key)
+GET {{host}}/health
+
+### Mint a tenant-scoped api key (bootstrap key only; secret shown once)
+POST {{host}}/api/apikeys
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default",
+  "name": "backend"
+}
+
+### List a tenant's api keys (bootstrap key only)
+POST {{host}}/api/apikeys/list
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default"
+}
+
+### Revoke an api key (bootstrap key only)
+PUT {{host}}/api/apikeys/delete
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000"
+}
+
+### Create a resource type (response includes the generated id)
+POST {{host}}/api/resources
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "name": "document",
+  "actions": ["read", "write", "delete"]
+}
+
+### Get a resource type
+POST {{host}}/api/resources/get
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000"
+}
+
+### List resource types
+POST {{host}}/api/resources/list
+Content-Type: application/json
+
+{
+  "tenantId": "default"
+}
+
+### Update a resource type's name and actions
+PUT {{host}}/api/resources
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "name": "document",
+  "actions": ["read", "write", "delete", "share"]
+}
+
+### Create a role (response includes the generated id)
+POST {{host}}/api/roles
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "name": "editor",
+  "permissions": [
+    {"resource": "document", "action": "read"},
+    {"resource": "document", "action": "write"}
+  ]
+}
+
+### List roles
+POST {{host}}/api/roles/list
+Content-Type: application/json
+
+{
+  "tenantId": "default"
+}
+
+### Assign a role (use the id returned by role create)
+POST {{host}}/api/assignments
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com",
+  "roleId": "00000000-0000-0000-0000-000000000000"
+}
+
+### List assignments (filter by subject and/or role)
+POST {{host}}/api/assignments/list
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com"
+}
+
+### Roles for a subject (for JWT roles claim)
+POST {{host}}/api/subjects/roles
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "key": "user@example.com"
+}
+
+### Check
+POST {{host}}/api/check
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com",
+  "action": "write",
+  "resource": "document"
+}
+
+### Bulk check
+POST {{host}}/api/check/bulk
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "checks": [
+    {"subject": "user@example.com", "action": "write", "resource": "document"},
+    {"subject": "user@example.com", "action": "delete", "resource": "document"}
+  ]
+}
+
+### Remove an assignment
+PUT {{host}}/api/assignments/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "subject": "user@example.com",
+  "roleId": "00000000-0000-0000-0000-000000000000"
+}
+
+### Delete a role (cascades its grants and assignments)
+PUT {{host}}/api/roles/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000"
+}
+
+### Delete a resource type (409 while roles reference it)
+PUT {{host}}/api/resources/delete
+Content-Type: application/json
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000"
+}

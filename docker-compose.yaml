@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: az_postgres_container
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: az
+      POSTGRES_PASSWORD: az
+      POSTGRES_DB: az
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U az -d az"]
+      start_period: 0s
+      interval: 500ms
+      timeout: 5s
+      retries: 10
+  az:
+    build:
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    env_file:
+      - .env
+    environment:
+      # inside the compose network postgres is reachable by service name,
+      # overriding the localhost default in .env
+      DB_CONNECTION: postgres://az:az@postgres:5432/az?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    container_name: az_container
