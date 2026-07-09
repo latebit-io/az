@@ -15,10 +15,13 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+	apikeysapi "github.com/latebit-io/az/api/apikeys"
+	"github.com/latebit-io/az/api/auth"
 	checkapi "github.com/latebit-io/az/api/check"
 	"github.com/latebit-io/az/api/health"
 	resourcesapi "github.com/latebit-io/az/api/resources"
 	rolesapi "github.com/latebit-io/az/api/roles"
+	"github.com/latebit-io/az/internal/apikeys"
 	"github.com/latebit-io/az/internal/check"
 	"github.com/latebit-io/az/internal/db"
 	"github.com/latebit-io/az/internal/resources"
@@ -94,9 +97,13 @@ func main() {
 		config.DecisionLogEnabled)
 	checkHandler := checkapi.NewCheckHandler(checkService)
 	checkapi.CheckRoutes(service, checkHandler, ratelimiter)
+	apiKeyRepository := apikeys.NewPostgresApiKeyRepository(pool)
+	apiKeyService := apikeys.NewDefaultApiKeyService(apiKeyRepository)
+	apiKeyHandler := apikeysapi.NewApiKeyHandler(apiKeyService)
+	apikeysapi.ApiKeyRoutes(service, apiKeyHandler, ratelimiter)
 
 	corsSetting(service, config, logger)
-	apiKeySetting(service, config, logger)
+	apiKeySetting(service, config, apiKeyService, logger)
 
 	healthHandler := health.NewHealthHandler()
 	health.HealthRoutes(service, healthHandler)
@@ -145,15 +152,12 @@ func corsSetting(service *echo.Echo, config *AppConfig, logger *slog.Logger) {
 	logger.Info("cors enabled")
 }
 
-func apiKeySetting(service *echo.Echo, config *AppConfig, logger *slog.Logger) {
-	if !config.ApiKeyEnabled {
+func apiKeySetting(service *echo.Echo, config *AppConfig, apiKeyService apikeys.ApiKeyService,
+	logger *slog.Logger) {
+	if config.BootstrapApiKey == "" {
+		logger.Warn("BOOTSTRAP_API_KEY not set — api key auth is DISABLED, all endpoints are open")
 		return
 	}
-	service.Use(middleware.KeyAuthWithConfig(middleware.KeyAuthConfig{
-		KeyLookup: "header:X-AZ-API-KEY",
-		Validator: func(c *echo.Context, key string, source middleware.ExtractorSource) (bool, error) {
-			return utils.SafeCompare(key, os.Getenv("API_KEY")), nil
-		},
-	}))
-	logger.Info("api key enabled")
+	service.Use(auth.Middleware(apiKeyService, config.BootstrapApiKey))
+	logger.Info("api key auth enabled")
 }

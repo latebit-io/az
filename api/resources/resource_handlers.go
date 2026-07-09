@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/latebit-io/az/api/auth"
 	"github.com/latebit-io/az/api/problem"
 	"github.com/latebit-io/az/internal/resources"
-	"github.com/latebit-io/az/internal/utils"
 )
 
 type ResourceHandler struct {
@@ -49,7 +49,7 @@ func (rh ResourceHandler) Create(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	resourceType, err := rh.resources.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	resourceType, err := rh.resources.Create(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Name, request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
@@ -66,7 +66,7 @@ func (rh ResourceHandler) Get(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	resourceType, err := rh.resources.Get(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
+	resourceType, err := rh.resources.Get(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
@@ -82,7 +82,7 @@ func (rh ResourceHandler) List(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	resourceTypes, err := rh.resources.List(c.Request().Context(), utils.TenantOrDefault(request.TenantID))
+	resourceTypes, err := rh.resources.List(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID))
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}
@@ -98,7 +98,7 @@ func (rh ResourceHandler) Update(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.resources.Update(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID,
+	err := rh.resources.Update(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID,
 		request.Name, request.Actions)
 	if err != nil {
 		return resourceTypeProblem(c, err)
@@ -116,7 +116,7 @@ func (rh ResourceHandler) Delete(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.resources.Delete(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
+	err := rh.resources.Delete(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID)
 	if err != nil {
 		return resourceTypeProblem(c, err)
 	}

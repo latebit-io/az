@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/latebit-io/az/api/auth"
 	"github.com/latebit-io/az/api/problem"
 	"github.com/latebit-io/az/internal/check"
-	"github.com/latebit-io/az/internal/utils"
 )
 
 type CheckHandler struct {
@@ -43,7 +43,7 @@ func (ch CheckHandler) Check(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	decision, err := ch.check.Check(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	decision, err := ch.check.Check(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		check.CheckRequest{Subject: request.Subject, Action: request.Action, Resource: request.Resource})
 	if err != nil {
 		return checkProblem(c, err)
@@ -60,7 +60,7 @@ func (ch CheckHandler) CheckBulk(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	decisions, err := ch.check.CheckBulk(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	decisions, err := ch.check.CheckBulk(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Checks)
 	if err != nil {
 		return checkProblem(c, err)

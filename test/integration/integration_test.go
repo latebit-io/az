@@ -199,6 +199,70 @@ func TestTenantIsolation(t *testing.T) {
 	assert.False(t, denyDecision.Allow)
 }
 
+// TestApiKeyTenantScoping needs the service running with BOOTSTRAP_API_KEY
+// set and API_KEY exported for the suite; skipped otherwise.
+func TestApiKeyTenantScoping(t *testing.T) {
+	if az.apiKey == "" {
+		t.Skip("API_KEY not set — service running without api key auth")
+	}
+	tenant := newTenant()
+
+	// no key → 401
+	bare := newClient(baseURI)
+	status, err := bare.post("/api/roles/list", map[string]any{"tenantId": tenant}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, status)
+
+	// bootstrap key mints a tenant-scoped key
+	var created struct {
+		ID  string `json:"id"`
+		Key string `json:"key"`
+	}
+	status, err = az.post("/api/apikeys", map[string]any{"tenantId": tenant, "name": "ci"}, &created)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, status)
+	require.NotEmpty(t, created.Key)
+
+	// seed policy in the tenant with the bootstrap key
+	status, err = az.post("/api/resources", map[string]any{
+		"tenantId": tenant, "name": "widget", "actions": []string{"use"},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, status)
+
+	// the tenant key works within its tenant
+	tenantClient := newClient(baseURI)
+	tenantClient.apiKey = created.Key
+
+	var types []map[string]any
+	status, err = tenantClient.post("/api/resources/list", map[string]any{}, &types)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	assert.Len(t, types, 1)
+
+	// a tenant key cannot escape its tenant: asking for another tenant's
+	// data still returns its own
+	status, err = tenantClient.post("/api/resources/list", map[string]any{"tenantId": "default"}, &types)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	assert.Len(t, types, 1)
+	assert.Equal(t, tenant, types[0]["tenantId"])
+
+	// a tenant key cannot manage api keys
+	status, err = tenantClient.post("/api/apikeys", map[string]any{"name": "sneaky"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, status)
+
+	// revoked keys stop working
+	status, err = az.put("/api/apikeys/delete", map[string]any{"tenantId": tenant, "id": created.ID}, nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, status)
+
+	status, err = tenantClient.post("/api/resources/list", map[string]any{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, status)
+}
+
 func TestProblemDetailsShape(t *testing.T) {
 	tenant := newTenant()
 

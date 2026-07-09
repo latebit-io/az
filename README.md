@@ -41,6 +41,23 @@ curl -X POST localhost:8080/api/check -H 'Content-Type: application/json' \
 
 An empty `tenantId` means the `default` tenant; pass `tenantId` in any body to scope to another tenant. More examples in `http/az.http.example`.
 
+## Authentication
+
+Set `BOOTSTRAP_API_KEY` and every endpoint except `/health` requires a key in the `X-AZ-API-KEY` header (unset means auth is disabled — dev only). Two kinds of key, permit.io environment-key style:
+
+- **Bootstrap key** (the env var): the root credential. Works on any tenant and is the only key that can manage api keys.
+- **Tenant keys**: minted per tenant via the api. Full capability — manage policy, check — but locked to their tenant: the tenant comes from the key, any `tenantId` in the body is ignored.
+
+```bash
+# mint a tenant-scoped key (bootstrap key required; secret is shown once)
+curl -X POST localhost:8080/api/apikeys \
+  -H "X-AZ-API-KEY: $BOOTSTRAP_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"tenantId":"acme","name":"backend"}'
+# {"id":"...","tenantId":"acme","name":"backend","prefix":"azk_1a2b3c4d","key":"azk_..."}
+```
+
+Keys are stored hashed (sha256 of the high-entropy token); only the `azk_` prefix is kept readable for lookup and log identification. Revoke with `PUT /api/apikeys/delete`.
+
 ## How a check decides
 
 1. Resolve the resource type. Unknown type or action → deny (denies are `200 {allow:false}`, never errors).
@@ -57,7 +74,8 @@ All endpoints take JSON bodies; errors are RFC 7807 problem details.
 | Roles | `POST /api/roles` (+`/get`, `/list`) · `PUT /api/roles` · `PUT /api/roles/delete` |
 | Assignments | `POST /api/assignments` · `POST /api/assignments/list` · `PUT /api/assignments/delete` · `POST /api/subjects/roles` |
 | Check | `POST /api/check` · `POST /api/check/bulk` |
-| Health | `GET /health` |
+| Api keys | `POST /api/apikeys` · `POST /api/apikeys/list` · `PUT /api/apikeys/delete` (bootstrap key only) |
+| Health | `GET /health` (unauthenticated) |
 
 Referential integrity is foreign keys: a grant referencing an undeclared `resource:action` is rejected (`400`), deleting a role cascades its grants and assignments, and deleting a resource type (or removing a still-granted action) returns `409` while a role references it.
 
@@ -72,8 +90,7 @@ All configuration is via environment variables (a `.env` file is loaded when pre
 | `PORT` | `8080` | HTTP port |
 | `DB_CONNECTION` | `postgres://az:az@localhost:5432/az?sslmode=disable` | PostgreSQL connection string |
 | `REQUESTS_PER_SECOND` | `20` | Rate limit |
-| `API_KEY_ENABLED` | `false` | Require `X-AZ-API-KEY` header on all endpoints |
-| `API_KEY` | — | The API key when enabled |
+| `BOOTSTRAP_API_KEY` | — | Root api key; when set, all endpoints except `/health` require a key |
 | `CORS_ENABLED` | `false` | Enable CORS |
 | `ALLOWED_WEB_ORIGINS` | — | Comma-separated CORS origins |
 | `DOMAIN` | — | Appended to CORS origins as `https://<domain>` |

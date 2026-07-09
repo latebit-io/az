@@ -74,7 +74,7 @@ jobs:
         env:
           DB_CONNECTION: postgres://az:az@localhost:5432/az?sslmode=disable
           PORT: 8080
-          API_KEY_ENABLED: false
+          BOOTSTRAP_API_KEY: ci-bootstrap-key
           CORS_ENABLED: false
           DECISION_LOG_ENABLED: true
           REQUESTS_PER_SECOND: 1000
@@ -82,6 +82,8 @@ jobs:
       - name: Run integration tests
         run: go test -v ./...
         working-directory: test
+        env:
+          API_KEY: ci-bootstrap-key
 
       - name: Stop az service
         if: always()

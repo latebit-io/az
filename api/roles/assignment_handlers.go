@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/latebit-io/az/api/auth"
 	"github.com/latebit-io/az/api/problem"
 	"github.com/latebit-io/az/internal/roles"
-	"github.com/latebit-io/az/internal/utils"
 )
 
 type AssignmentHandler struct {
@@ -48,7 +48,7 @@ func (ah AssignmentHandler) Assign(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := ah.assignments.Assign(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	err := ah.assignments.Assign(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
@@ -65,7 +65,7 @@ func (ah AssignmentHandler) List(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	assignments, err := ah.assignments.List(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	assignments, err := ah.assignments.List(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
@@ -82,7 +82,7 @@ func (ah AssignmentHandler) Unassign(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := ah.assignments.Unassign(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	err := ah.assignments.Unassign(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Subject, request.RoleID)
 	if err != nil {
 		return assignmentProblem(c, err)
@@ -100,7 +100,7 @@ func (ah AssignmentHandler) SubjectRoles(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	roleKeys, err := ah.assignments.RolesForSubject(c.Request().Context(), utils.TenantOrDefault(request.TenantID),
+	roleKeys, err := ah.assignments.RolesForSubject(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID),
 		request.Key)
 	if err != nil {
 		return assignmentProblem(c, err)

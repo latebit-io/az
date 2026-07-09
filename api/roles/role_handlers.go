@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/latebit-io/az/api/auth"
 	"github.com/latebit-io/az/api/problem"
 	"github.com/latebit-io/az/internal/roles"
-	"github.com/latebit-io/az/internal/utils"
 )
 
 type RoleHandler struct {
@@ -50,7 +50,7 @@ func (rh RoleHandler) Create(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	role, err := rh.roles.Create(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.Name,
+	role, err := rh.roles.Create(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.Name,
 		request.Permissions)
 	if err != nil {
 		return roleProblem(c, err)
@@ -67,7 +67,7 @@ func (rh RoleHandler) Get(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	role, err := rh.roles.Get(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
+	role, err := rh.roles.Get(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID)
 	if err != nil {
 		return roleProblem(c, err)
 	}
@@ -83,7 +83,7 @@ func (rh RoleHandler) List(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	roleList, err := rh.roles.List(c.Request().Context(), utils.TenantOrDefault(request.TenantID))
+	roleList, err := rh.roles.List(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID))
 	if err != nil {
 		return roleProblem(c, err)
 	}
@@ -99,7 +99,7 @@ func (rh RoleHandler) Update(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.roles.Update(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID,
+	err := rh.roles.Update(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID,
 		request.Name, request.Permissions)
 	if err != nil {
 		return roleProblem(c, err)
@@ -116,7 +116,7 @@ func (rh RoleHandler) Delete(c *echo.Context) error {
 		return c.JSON(httpError.Status, httpError)
 	}
 
-	err := rh.roles.Delete(c.Request().Context(), utils.TenantOrDefault(request.TenantID), request.ID)
+	err := rh.roles.Delete(c.Request().Context(), auth.EffectiveTenant(c, request.TenantID), request.ID)
 	if err != nil {
 		return roleProblem(c, err)
 	}

@@ -1,11 +1,41 @@
 ### Copy this file to az.http and adjust values. Requires a running az service.
 
 @host = http://localhost:8080
-# When API_KEY_ENABLED=true add to each request:
-# X-AZ-API-KEY: your-api-key
+# When BOOTSTRAP_API_KEY is set, add to each request (except /health):
+# X-AZ-API-KEY: {{key}}
+@key = your-bootstrap-or-tenant-key
 
-### Health
+### Health (never requires a key)
 GET {{host}}/health
+
+### Mint a tenant-scoped api key (bootstrap key only; secret shown once)
+POST {{host}}/api/apikeys
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default",
+  "name": "backend"
+}
+
+### List a tenant's api keys (bootstrap key only)
+POST {{host}}/api/apikeys/list
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default"
+}
+
+### Revoke an api key (bootstrap key only)
+PUT {{host}}/api/apikeys/delete
+Content-Type: application/json
+X-AZ-API-KEY: {{key}}
+
+{
+  "tenantId": "default",
+  "id": "00000000-0000-0000-0000-000000000000"
+}
 
 ### Create a resource type (response includes the generated id)
 POST {{host}}/api/resources

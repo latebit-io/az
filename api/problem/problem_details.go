@@ -43,6 +43,15 @@ func NewBadRequest(err error) Details {
 	}
 }
 
+func NewUnauthorized(detail string) Details {
+	return Details{
+		Type:   errorType,
+		Title:  Unauthorized,
+		Status: http.StatusUnauthorized,
+		Detail: detail,
+	}
+}
+
 func NewProblem(title string, status int, err error) Details {
 	return Details{
 		Type:   errorType,

@@ -8,7 +8,7 @@ import (
 
 type AppConfig struct {
 	AllowedOrigins     []string
-	ApiKeyEnabled      bool
+	BootstrapApiKey    string
 	CORSEnabled        bool
 	DbConnection       string
 	DecisionLogEnabled bool
@@ -25,7 +25,7 @@ func NewAppConfig() (*AppConfig, error) {
 	config.DbConnection = getEnv("DB_CONNECTION", "postgres://az:az@localhost:5432/az?sslmode=disable")
 	config.Domain = getEnv("DOMAIN", "")
 	config.AllowedOrigins = getEnvAsStringSlice("ALLOWED_WEB_ORIGINS", []string{})
-	config.ApiKeyEnabled = getEnv("API_KEY_ENABLED", "false") == "true"
+	config.BootstrapApiKey = getEnv("BOOTSTRAP_API_KEY", "")
 	config.CORSEnabled = getEnv("CORS_ENABLED", "false") == "true"
 	config.DecisionLogEnabled = getEnv("DECISION_LOG_ENABLED", "true") == "true"
 	config.RequestsPerSecond = getEnvAsInt("REQUESTS_PER_SECOND", 20)
