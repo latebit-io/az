@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -8,21 +10,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	az "github.com/latebit-io/az-client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 var (
 	baseURI = "http://localhost:8080"
-	az      *client
+	apiKey  string
+	client  *az.Client
 )
 
 func TestMain(m *testing.M) {
 	if uri := os.Getenv("AZ_BASE_URI"); uri != "" {
 		baseURI = uri
 	}
-	az = newClient(baseURI)
-	az.apiKey = os.Getenv("API_KEY")
+	apiKey = os.Getenv("API_KEY")
+	client = az.NewClient(baseURI, apiKey, nil)
 
 	// wait for the service to be reachable
 	ready := false
@@ -45,11 +49,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-type decision struct {
-	Allow  bool   `json:"allow"`
-	Reason string `json:"reason"`
-}
-
 // newTenant returns a unique tenant id so runs are isolated and repeatable
 // against the same database.
 func newTenant() string {
@@ -57,228 +56,148 @@ func newTenant() string {
 }
 
 func TestFullAuthorizationFlow(t *testing.T) {
+	ctx := context.Background()
 	tenant := newTenant()
 
 	// resource type; create returns the type with its generated id
-	var document struct {
-		ID string `json:"id"`
-	}
-	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenant, "name": "document",
-		"actions": []string{"read", "write", "delete"},
-	}, &document)
+	document, err := client.Resources.Create(ctx, tenant, "document", []string{"read", "write", "delete"})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 	require.NotEmpty(t, document.ID)
 
 	// role + assignment; create returns the role with its generated id
-	var editor struct {
-		ID string `json:"id"`
-	}
-	status, err = az.post("/api/roles", map[string]any{
-		"tenantId": tenant, "name": "editor",
-		"permissions": []map[string]string{
-			{"resource": "document", "action": "read"},
-			{"resource": "document", "action": "write"},
-		},
-	}, &editor)
+	editor, err := client.Roles.Create(ctx, tenant, "editor", []az.Permission{
+		{Resource: "document", Action: "read"},
+		{Resource: "document", Action: "write"},
+	})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 	require.NotEmpty(t, editor.ID)
 
-	status, err = az.post("/api/assignments", map[string]any{
-		"tenantId": tenant, "subject": "alice@example.com", "roleId": editor.ID,
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
+	require.NoError(t, client.Assignments.Assign(ctx, tenant, "alice@example.com", editor.ID))
 
 	// roles-for-subject (the JWT claim payload)
-	var rolesResponse struct {
-		Roles []string `json:"roles"`
-	}
-	status, err = az.post("/api/subjects/roles", map[string]any{
-		"tenantId": tenant, "key": "alice@example.com",
-	}, &rolesResponse)
+	roles, err := client.Assignments.SubjectRoles(ctx, tenant, "alice@example.com")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	assert.Equal(t, []string{"editor"}, rolesResponse.Roles)
+	assert.Equal(t, []string{"editor"}, roles)
 
-	// checks
-	var allowDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant, "subject": "alice@example.com", "action": "write", "resource": "document",
-	}, &allowDecision)
+	// checks — denies are decisions, not errors
+	allowDecision, err := client.Check(ctx, tenant, "alice@example.com", "write", "document")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
 	assert.True(t, allowDecision.Allow, allowDecision.Reason)
 
-	var denyDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenant, "subject": "alice@example.com", "action": "delete", "resource": "document",
-	}, &denyDecision)
+	denyDecision, err := client.Check(ctx, tenant, "alice@example.com", "delete", "document")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
 	assert.False(t, denyDecision.Allow, denyDecision.Reason)
 
 	// bulk
-	var bulk struct {
-		Results []decision `json:"results"`
-	}
-	status, err = az.post("/api/check/bulk", map[string]any{
-		"tenantId": tenant,
-		"checks": []map[string]any{
-			{"subject": "alice@example.com", "action": "write", "resource": "document"},
-			{"subject": "alice@example.com", "action": "delete", "resource": "document"},
-		},
-	}, &bulk)
+	results, err := client.CheckBulk(ctx, tenant, []az.CheckRequest{
+		{Subject: "alice@example.com", Action: "write", Resource: "document"},
+		{Subject: "alice@example.com", Action: "delete", Resource: "document"},
+	})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	require.Len(t, bulk.Results, 2)
-	assert.True(t, bulk.Results[0].Allow)
-	assert.False(t, bulk.Results[1].Allow)
+	require.Len(t, results, 2)
+	assert.True(t, results[0].Allow)
+	assert.False(t, results[1].Allow)
 
 	// referenced resource type cannot be deleted
-	status, err = az.put("/api/resources/delete", map[string]any{
-		"tenantId": tenant, "id": document.ID,
-	}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusConflict, status)
+	err = client.Resources.Delete(ctx, tenant, document.ID)
+	problem := requireProblem(t, err)
+	assert.Equal(t, http.StatusConflict, problem.Status)
 
 	// unwind: role (grants + assignments cascade) -> resource type
-	status, err = az.put("/api/roles/delete", map[string]any{"tenantId": tenant, "id": editor.ID}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNoContent, status)
-
-	status, err = az.put("/api/resources/delete", map[string]any{"tenantId": tenant, "id": document.ID}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNoContent, status)
+	require.NoError(t, client.Roles.Delete(ctx, tenant, editor.ID))
+	require.NoError(t, client.Resources.Delete(ctx, tenant, document.ID))
 }
 
 func TestTenantIsolation(t *testing.T) {
+	ctx := context.Background()
 	tenantA := newTenant()
 	tenantB := newTenant()
 
-	status, err := az.post("/api/resources", map[string]any{
-		"tenantId": tenantA, "name": "widget", "actions": []string{"use"},
-	}, nil)
+	_, err := client.Resources.Create(ctx, tenantA, "widget", []string{"use"})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 
-	var user struct {
-		ID string `json:"id"`
-	}
-	status, err = az.post("/api/roles", map[string]any{
-		"tenantId": tenantA, "name": "User",
-		"permissions": []map[string]string{{"resource": "widget", "action": "use"}},
-	}, &user)
+	user, err := client.Roles.Create(ctx, tenantA, "User",
+		[]az.Permission{{Resource: "widget", Action: "use"}})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 
-	status, err = az.post("/api/assignments", map[string]any{
-		"tenantId": tenantA, "subject": "alice", "roleId": user.ID,
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
+	require.NoError(t, client.Assignments.Assign(ctx, tenantA, "alice", user.ID))
 
 	// allowed in tenant A
-	var allowDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenantA, "subject": "alice", "action": "use", "resource": "widget",
-	}, &allowDecision)
+	allowDecision, err := client.Check(ctx, tenantA, "alice", "use", "widget")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
 	assert.True(t, allowDecision.Allow)
 
 	// denied in tenant B — the resource type does not even exist there
-	var denyDecision decision
-	status, err = az.post("/api/check", map[string]any{
-		"tenantId": tenantB, "subject": "alice", "action": "use", "resource": "widget",
-	}, &denyDecision)
+	denyDecision, err := client.Check(ctx, tenantB, "alice", "use", "widget")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
 	assert.False(t, denyDecision.Allow)
 }
 
 // TestApiKeyTenantScoping needs the service running with BOOTSTRAP_API_KEY
 // set and API_KEY exported for the suite; skipped otherwise.
 func TestApiKeyTenantScoping(t *testing.T) {
-	if az.apiKey == "" {
+	if apiKey == "" {
 		t.Skip("API_KEY not set — service running without api key auth")
 	}
+	ctx := context.Background()
 	tenant := newTenant()
 
 	// no key → 401
-	bare := newClient(baseURI)
-	status, err := bare.post("/api/roles/list", map[string]any{"tenantId": tenant}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnauthorized, status)
+	_, err := az.NewClient(baseURI, "", nil).Roles.List(ctx, tenant)
+	problem := requireProblem(t, err)
+	assert.Equal(t, http.StatusUnauthorized, problem.Status)
 
 	// bootstrap key mints a tenant-scoped key
-	var created struct {
-		ID  string `json:"id"`
-		Key string `json:"key"`
-	}
-	status, err = az.post("/api/apikeys", map[string]any{"tenantId": tenant, "name": "ci"}, &created)
+	created, err := client.ApiKeys.Create(ctx, tenant, "ci")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 	require.NotEmpty(t, created.Key)
 
 	// seed policy in the tenant with the bootstrap key
-	status, err = az.post("/api/resources", map[string]any{
-		"tenantId": tenant, "name": "widget", "actions": []string{"use"},
-	}, nil)
+	_, err = client.Resources.Create(ctx, tenant, "widget", []string{"use"})
 	require.NoError(t, err)
-	require.Equal(t, http.StatusCreated, status)
 
 	// the tenant key works within its tenant
-	tenantClient := newClient(baseURI)
-	tenantClient.apiKey = created.Key
+	tenantClient := az.NewClient(baseURI, created.Key, nil)
 
-	var types []map[string]any
-	status, err = tenantClient.post("/api/resources/list", map[string]any{}, &types)
+	types, err := tenantClient.Resources.List(ctx, "")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
 	assert.Len(t, types, 1)
 
 	// a tenant key cannot escape its tenant: asking for another tenant's
 	// data still returns its own
-	status, err = tenantClient.post("/api/resources/list", map[string]any{"tenantId": "default"}, &types)
+	types, err = tenantClient.Resources.List(ctx, "default")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, status)
-	assert.Len(t, types, 1)
-	assert.Equal(t, tenant, types[0]["tenantId"])
+	require.Len(t, types, 1)
+	assert.Equal(t, tenant, types[0].TenantID)
 
 	// a tenant key cannot manage api keys
-	status, err = tenantClient.post("/api/apikeys", map[string]any{"name": "sneaky"}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusForbidden, status)
+	_, err = tenantClient.ApiKeys.Create(ctx, "", "sneaky")
+	problem = requireProblem(t, err)
+	assert.Equal(t, http.StatusForbidden, problem.Status)
 
 	// revoked keys stop working
-	status, err = az.put("/api/apikeys/delete", map[string]any{"tenantId": tenant, "id": created.ID}, nil)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusNoContent, status)
+	require.NoError(t, client.ApiKeys.Revoke(ctx, tenant, created.ID))
 
-	status, err = tenantClient.post("/api/resources/list", map[string]any{}, nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusUnauthorized, status)
+	_, err = tenantClient.Resources.List(ctx, "")
+	problem = requireProblem(t, err)
+	assert.Equal(t, http.StatusUnauthorized, problem.Status)
 }
 
 func TestProblemDetailsShape(t *testing.T) {
+	ctx := context.Background()
 	tenant := newTenant()
 
-	var details struct {
-		Type   string `json:"type"`
-		Title  string `json:"title"`
-		Status int    `json:"status"`
-		Detail string `json:"detail"`
-	}
-	request := map[string]any{"tenantId": tenant, "id": "00000000-0000-0000-0000-000000000000"}
-	response, err := az.rawPost("/api/resources/get", request)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	require.Equal(t, http.StatusNotFound, response.StatusCode)
-	require.NoError(t, jsonDecode(response, &details))
-	assert.Equal(t, http.StatusNotFound, details.Status)
-	assert.Equal(t, "https://latebit.io/az/errors/", details.Type)
-	assert.NotEmpty(t, details.Detail)
+	_, err := client.Resources.Get(ctx, tenant, "00000000-0000-0000-0000-000000000000")
+	problem := requireProblem(t, err)
+	assert.Equal(t, http.StatusNotFound, problem.Status)
+	assert.Equal(t, "https://latebit.io/az/errors/", problem.Type)
+	assert.NotEmpty(t, problem.Detail)
+}
+
+func requireProblem(t *testing.T, err error) *az.Error {
+	t.Helper()
+	require.Error(t, err)
+	var problem *az.Error
+	require.True(t, errors.As(err, &problem), "expected problem details, got: %v", err)
+	return problem
 }

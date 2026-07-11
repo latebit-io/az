@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v5 v5.2.1
+	github.com/latebit-io/az-client v0.1.1
 	github.com/stretchr/testify v1.11.1
 )
 
