@@ -152,19 +152,24 @@ func TestApiKeyTenantScoping(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, created.Key)
 
-	// seed policy in the tenant with the bootstrap key
+	// seed policy in the tenant with the bootstrap key, and a decoy in
+	// default so a cross-tenant leak would actually surface below
 	_, err = client.Resources.Create(ctx, tenant, "widget", []string{"use"})
 	require.NoError(t, err)
+	decoy := "decoy-" + newTenant()
+	_, err = client.Resources.Create(ctx, "default", decoy, []string{"use"})
+	require.NoError(t, err)
 
-	// the tenant key works within its tenant
+	// the tenant key works within its tenant and sees only its own data
 	tenantClient := az.NewClient(baseURI, created.Key, nil)
 
 	types, err := tenantClient.Resources.List(ctx, "")
 	require.NoError(t, err)
-	assert.Len(t, types, 1)
+	require.Len(t, types, 1)
+	assert.Equal(t, tenant, types[0].TenantID)
 
 	// a tenant key cannot escape its tenant: asking for another tenant's
-	// data still returns its own
+	// data still returns its own, not default's
 	types, err = tenantClient.Resources.List(ctx, "default")
 	require.NoError(t, err)
 	require.Len(t, types, 1)
