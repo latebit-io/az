@@ -19,10 +19,6 @@ const (
 type ResourceTypeRepository interface {
 	Create(ctx context.Context, resourceType ResourceType) (*ResourceType, error)
 	Read(ctx context.Context, tenantID, id string) (*ResourceType, error)
-	// ResolveAction resolves a resource type by its per-tenant name and
-	// reports whether it declares the action — the check path entry point.
-	// A single indexed row lookup, no aggregation.
-	ResolveAction(ctx context.Context, tenantID, name, action string) (string, bool, error)
 	ReadAll(ctx context.Context, tenantID string) ([]ResourceType, error)
 	Update(ctx context.Context, resourceType ResourceType) error
 	Delete(ctx context.Context, tenantID, id string) error
@@ -80,25 +76,6 @@ func (r *PostgresResourceTypeRepository) Read(ctx context.Context, tenantID, id 
 		return nil, err
 	}
 	return resourceType, nil
-}
-
-func (r *PostgresResourceTypeRepository) ResolveAction(ctx context.Context, tenantID, name,
-	action string) (string, bool, error) {
-	querier := utils.QuerierFrom(ctx, r.pool)
-	var id string
-	var declared bool
-	err := querier.QueryRow(ctx,
-		`SELECT rt.id, a.action IS NOT NULL
-		 FROM resource_types rt
-		 LEFT JOIN resource_type_actions a ON a.resource_type_id = rt.id AND a.action = $3
-		 WHERE rt.tenant_id = $1 AND rt.name = $2`, tenantID, name, action).Scan(&id, &declared)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, ResourceTypeNotFoundError{Value: name}
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return id, declared, nil
 }
 
 func (r *PostgresResourceTypeRepository) ReadAll(ctx context.Context, tenantID string) ([]ResourceType, error) {

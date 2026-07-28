@@ -49,7 +49,7 @@ func newCheckFixture(t *testing.T) (CheckService, context.Context) {
 	require.NoError(t, assignmentService.Assign(ctx, "default", "bob", viewer.ID))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	checkService := NewDefaultCheckService(resourceRepo, roleRepo, logger, true)
+	checkService := NewDefaultCheckService(NewPostgresCheckRepository(pool), logger, true)
 	return checkService, ctx
 }
 
@@ -135,4 +135,80 @@ func TestCheck_ReasonMentionsGrantingRole(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, decision.Allow)
 	assert.Contains(t, decision.Reason, "editor")
+}
+
+// TestCheckRepository_Resolve exercises the single-round-trip query directly:
+// alice holds two roles and only one of them grants write, so the lateral join
+// has to pick the granting role rather than the first assigned one.
+func TestCheckRepository_Resolve(t *testing.T) {
+	pool := utils.NewTestPool(t)
+	ctx := context.Background()
+	txManager := utils.NewPostgresTxManager(pool)
+	resourceService := resources.NewDefaultResourceService(resources.NewPostgresResourceTypeRepository(pool),
+		txManager)
+	roleService := roles.NewDefaultRoleService(roles.NewPostgresRoleRepository(pool), txManager)
+	assignmentService := roles.NewDefaultAssignmentService(roles.NewPostgresAssignmentRepository(pool))
+
+	_, err := resourceService.Create(ctx, "default", "document", []string{"read", "write"})
+	require.NoError(t, err)
+	viewer, err := roleService.Create(ctx, "default", "Viewer",
+		[]roles.Permission{{Resource: "document", Action: "read"}})
+	require.NoError(t, err)
+	editor, err := roleService.Create(ctx, "default", "Editor",
+		[]roles.Permission{{Resource: "document", Action: "read"}, {Resource: "document", Action: "write"}})
+	require.NoError(t, err)
+
+	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", viewer.ID))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "alice", editor.ID))
+	require.NoError(t, assignmentService.Assign(ctx, "default", "bob", viewer.ID))
+
+	repo := NewPostgresCheckRepository(pool)
+
+	tests := []struct {
+		name     string
+		tenantID string
+		request  CheckRequest
+		expected Grant
+	}{
+		{"granting role wins over other assignments", "default",
+			CheckRequest{Subject: "alice", Action: "write", Resource: "document"},
+			Grant{TypeFound: true, ActionDeclared: true, Granted: true, RoleName: "Editor"}},
+		{"first role by name when several grant", "default",
+			CheckRequest{Subject: "alice", Action: "read", Resource: "document"},
+			Grant{TypeFound: true, ActionDeclared: true, Granted: true, RoleName: "Editor"}},
+		{"assigned but ungranted action", "default",
+			CheckRequest{Subject: "bob", Action: "write", Resource: "document"},
+			Grant{TypeFound: true, ActionDeclared: true}},
+		{"unassigned subject", "default",
+			CheckRequest{Subject: "nobody", Action: "read", Resource: "document"},
+			Grant{TypeFound: true, ActionDeclared: true}},
+		{"undeclared action", "default",
+			CheckRequest{Subject: "alice", Action: "share", Resource: "document"},
+			Grant{TypeFound: true}},
+		{"unknown resource type", "default",
+			CheckRequest{Subject: "alice", Action: "read", Resource: "spaceship"},
+			Grant{}},
+		{"tenant isolation", "other",
+			CheckRequest{Subject: "alice", Action: "write", Resource: "document"},
+			Grant{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			grant, err := repo.Resolve(ctx, tt.tenantID, tt.request)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, grant)
+		})
+	}
+
+	// both of alice's roles grant document:read, so an unordered LIMIT 1
+	// would be free to report either one from call to call
+	t.Run("granting role is stable across calls", func(t *testing.T) {
+		request := CheckRequest{Subject: "alice", Action: "read", Resource: "document"}
+		for range 10 {
+			grant, err := repo.Resolve(ctx, "default", request)
+			require.NoError(t, err)
+			assert.Equal(t, "Editor", grant.RoleName)
+		}
+	})
 }

@@ -19,10 +19,6 @@ type RoleRepository interface {
 	ReadAll(ctx context.Context, tenantID string) ([]Role, error)
 	Update(ctx context.Context, role Role) error
 	Delete(ctx context.Context, tenantID, id string) error
-	// SubjectGrant reports whether any role assigned to the subject grants
-	// the action on the resource type, returning the granting role's name —
-	// the check hot path.
-	SubjectGrant(ctx context.Context, tenantID, subject, resourceTypeID, action string) (string, bool, error)
 }
 
 type PostgresRoleRepository struct {
@@ -169,25 +165,6 @@ func (r *PostgresRoleRepository) Delete(ctx context.Context, tenantID, id string
 		return RoleNotFoundError{Value: id}
 	}
 	return nil
-}
-
-func (r *PostgresRoleRepository) SubjectGrant(ctx context.Context, tenantID, subject, resourceTypeID,
-	action string) (string, bool, error) {
-	querier := utils.QuerierFrom(ctx, r.pool)
-	var roleName string
-	err := querier.QueryRow(ctx,
-		`SELECT r.name FROM role_assignments a
-		 JOIN role_permissions p ON p.role_id = a.role_id
-		 JOIN roles r ON r.id = a.role_id AND r.tenant_id = a.tenant_id
-		 WHERE a.tenant_id = $1 AND a.subject = $2 AND p.resource_type_id = $3 AND p.action = $4
-		 LIMIT 1`, tenantID, subject, resourceTypeID, action).Scan(&roleName)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return roleName, true, nil
 }
 
 // insertPermissions writes the grants, resolving resource names to type ids.

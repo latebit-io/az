@@ -34,3 +34,6 @@ az.http
 
 # embedded-postgres test artifacts
 .embedded-postgres-go/
+
+# local agent/project scratch
+.project/
