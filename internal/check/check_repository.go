@@ -40,6 +40,10 @@ func NewPostgresCheckRepository(pool *pgxpool.Pool) CheckRepository {
 // does; the action column is null unless declared; the lateral subquery stops
 // at the first granting role. role_permissions has a foreign key onto
 // resource_type_actions, so an undeclared action can never join a grant.
+//
+// The lateral orders by name before LIMIT 1: several roles can grant the same
+// action, and an unordered limit would let the reported granting role — which
+// the decision log records — flap between identical requests.
 const resolveGrant = `
 	SELECT a.action IS NOT NULL, g.name
 	FROM resource_types rt
@@ -52,6 +56,7 @@ const resolveGrant = `
 	      ON p.role_id = ra.role_id AND p.resource_type_id = rt.id AND p.action = $4
 	    JOIN roles r ON r.id = ra.role_id AND r.tenant_id = ra.tenant_id
 	    WHERE ra.tenant_id = $1 AND ra.subject = $3
+	    ORDER BY r.name
 	    LIMIT 1
 	) g ON true
 	WHERE rt.tenant_id = $1 AND rt.name = $2`

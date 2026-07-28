@@ -173,6 +173,9 @@ func TestCheckRepository_Resolve(t *testing.T) {
 		{"granting role wins over other assignments", "default",
 			CheckRequest{Subject: "alice", Action: "write", Resource: "document"},
 			Grant{TypeFound: true, ActionDeclared: true, Granted: true, RoleName: "Editor"}},
+		{"first role by name when several grant", "default",
+			CheckRequest{Subject: "alice", Action: "read", Resource: "document"},
+			Grant{TypeFound: true, ActionDeclared: true, Granted: true, RoleName: "Editor"}},
 		{"assigned but ungranted action", "default",
 			CheckRequest{Subject: "bob", Action: "write", Resource: "document"},
 			Grant{TypeFound: true, ActionDeclared: true}},
@@ -197,4 +200,15 @@ func TestCheckRepository_Resolve(t *testing.T) {
 			assert.Equal(t, tt.expected, grant)
 		})
 	}
+
+	// both of alice's roles grant document:read, so an unordered LIMIT 1
+	// would be free to report either one from call to call
+	t.Run("granting role is stable across calls", func(t *testing.T) {
+		request := CheckRequest{Subject: "alice", Action: "read", Resource: "document"}
+		for range 10 {
+			grant, err := repo.Resolve(ctx, "default", request)
+			require.NoError(t, err)
+			assert.Equal(t, "Editor", grant.RoleName)
+		}
+	})
 }
