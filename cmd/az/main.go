@@ -93,8 +93,8 @@ func main() {
 	assignmentService := roles.NewDefaultAssignmentService(assignmentRepository)
 	assignmentHandler := rolesapi.NewAssignmentHandler(assignmentService)
 	rolesapi.AssignmentRoutes(service, assignmentHandler, ratelimiter)
-	checkService := check.NewDefaultCheckService(resourceRepository, roleRepository, logger,
-		config.DecisionLogEnabled)
+	checkRepository := check.NewPostgresCheckRepository(pool)
+	checkService := check.NewDefaultCheckService(checkRepository, logger, config.DecisionLogEnabled)
 	checkHandler := checkapi.NewCheckHandler(checkService)
 	checkapi.CheckRoutes(service, checkHandler, ratelimiter)
 	apiKeyRepository := apikeys.NewPostgresApiKeyRepository(pool)

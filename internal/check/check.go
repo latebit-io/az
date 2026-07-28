@@ -2,13 +2,9 @@ package check
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/latebit-io/az/internal/resources"
-	"github.com/latebit-io/az/internal/roles"
 )
 
 // CheckRequest asks whether subject may perform action on a resource type.
@@ -30,23 +26,20 @@ type CheckService interface {
 }
 
 type DefaultCheckService struct {
-	resourceTypes resources.ResourceTypeRepository
-	roles         roles.RoleRepository
-	logger        *slog.Logger
-	decisionLog   bool
+	checks      CheckRepository
+	logger      *slog.Logger
+	decisionLog bool
 }
 
 func NewDefaultCheckService(
-	resourceTypes resources.ResourceTypeRepository,
-	roleRepo roles.RoleRepository,
+	checks CheckRepository,
 	logger *slog.Logger,
 	decisionLog bool,
 ) CheckService {
 	return &DefaultCheckService{
-		resourceTypes: resourceTypes,
-		roles:         roleRepo,
-		logger:        logger,
-		decisionLog:   decisionLog,
+		checks:      checks,
+		logger:      logger,
+		decisionLog: decisionLog,
 	}
 }
 
@@ -96,28 +89,21 @@ func (s *DefaultCheckService) decide(ctx context.Context, tenantID string, reque
 		return Decision{}, InvalidCheckError{Value: "resource is required"}
 	}
 
-	// resolve the resource type by name; unknown type or action is a deny,
-	// not an error
-	resourceTypeID, actionDeclared, err := s.resourceTypes.ResolveAction(ctx, tenantID, request.Resource,
-		request.Action)
-	var typeNotFound resources.ResourceTypeNotFoundError
-	if errors.As(err, &typeNotFound) {
-		return Decision{Allow: false, Reason: fmt.Sprintf("unknown resource type '%s'", request.Resource)}, nil
-	}
+	// one round trip resolves type, action and grant together; unknown type
+	// or action is a deny, not an error
+	grant, err := s.checks.Resolve(ctx, tenantID, request)
 	if err != nil {
 		return Decision{}, err
 	}
-	if !actionDeclared {
+	if !grant.TypeFound {
+		return Decision{Allow: false, Reason: fmt.Sprintf("unknown resource type '%s'", request.Resource)}, nil
+	}
+	if !grant.ActionDeclared {
 		return Decision{Allow: false, Reason: fmt.Sprintf("unknown action '%s' for resource type '%s'",
 			request.Action, request.Resource)}, nil
 	}
-
-	roleName, granted, err := s.roles.SubjectGrant(ctx, tenantID, request.Subject, resourceTypeID, request.Action)
-	if err != nil {
-		return Decision{}, err
-	}
-	if granted {
-		return Decision{Allow: true, Reason: fmt.Sprintf("role '%s' grants %s:%s", roleName,
+	if grant.Granted {
+		return Decision{Allow: true, Reason: fmt.Sprintf("role '%s' grants %s:%s", grant.RoleName,
 			request.Resource, request.Action)}, nil
 	}
 
